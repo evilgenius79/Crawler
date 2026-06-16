@@ -12,6 +12,18 @@ class Frontier:
         self._queue: asyncio.Queue[tuple[str, int]] = asyncio.Queue()
         self._seen: set[str] = set()
 
+    def load(self, pending: list[tuple[str, int]], known: set[str]) -> None:
+        """Restore state from a persisted frontier.
+
+        ``known`` seeds the de-dup set (every URL we have ever queued) so we do
+        not re-enqueue them, while ``pending`` URLs are put back on the queue to
+        resume an interrupted crawl.
+        """
+        for url in known:
+            self._seen.add(url_hash(url))
+        for url, depth in pending:
+            self._queue.put_nowait((url, depth))
+
     def add(self, url: str, depth: int) -> bool:
         """Enqueue a URL if we have not seen it. Returns True if added."""
         key = url_hash(url)

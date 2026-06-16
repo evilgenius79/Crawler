@@ -30,3 +30,19 @@ blocked_domains: []          # e.g. ["facebook.com", "ads.example.com"]
 # Indexing. Keep metadata for binaries (images, zips, etc.) so they are
 # searchable by URL/type even when no text can be extracted.
 index_all_types: true
+
+# Safety. Block fetches that resolve to private/loopback/link-local addresses
+# (your LAN, localhost, cloud metadata). Strongly recommended; leave on.
+block_private_addresses: true
+
+# Resumability. Persist the frontier so an interrupted crawl can pick up where
+# it left off, and so scheduled re-crawls work.
+resume: true
+
+# Incremental re-crawling. On a crawl, re-queue any document last fetched more
+# than this many days ago. 0 disables (use the `recrawl`/`schedule` commands).
+recrawl_after_days: 0
+
+# JavaScript rendering. Requires Playwright + browsers installed (see README).
+render_js: false
+render_wait_ms: 1500

@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<!--
+  unraid Community Applications template for PersonalSearch.
+
+  How to use:
+    1. Build/push this image to a registry (or build locally on the server):
+         docker build -t personal-crawler:latest .
+    2. In unraid: Docker tab -> Add Container -> Template: paste this file's URL
+       (or drop it in /boot/config/plugins/dockerMan/templates-user/).
+    3. Set the Repository to wherever your image lives, map /data, and start.
+
+  The container serves the search UI on port 8000. Run crawls with the
+  built-in scheduler or via the User Scripts plugin (see README).
+-->
+<Container version="2">
+  <Name>PersonalSearch</Name>
+  <Repository>personal-crawler:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>
+    A personal, self-hosted web crawler and full-text search engine. Crawls the
+    sites you point it at (HTML, PDF, DOCX, text and more), indexes everything
+    into a single SQLite database, and serves an ad-free, Google-style search UI.
+  </Overview>
+  <Category>Productivity: Tools: Network:Web</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/evilgenius79/Crawler/main/.github/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <Config Name="WebUI Port" Target="8000" Default="8000" Mode="tcp"
+          Description="Port for the search web UI" Type="Port" Display="always"
+          Required="true" Mask="false">8000</Config>
+
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/personalsearch"
+          Mode="rw" Description="Where the SQLite index is stored"
+          Type="Path" Display="always" Required="true" Mask="false"
+          >/mnt/user/appdata/personalsearch</Config>
+
+  <Config Name="Seeds" Target="CRAWLER_SEEDS" Default="" Mode=""
+          Description="Comma-separated seed URLs (used by scheduled crawls)"
+          Type="Variable" Display="always" Required="false" Mask="false"></Config>
+
+  <Config Name="Max Pages" Target="CRAWLER_MAX_PAGES" Default="10000" Mode=""
+          Description="Upper bound on pages per crawl"
+          Type="Variable" Display="advanced" Required="false" Mask="false">10000</Config>
+
+  <Config Name="Concurrency" Target="CRAWLER_CONCURRENCY" Default="10" Mode=""
+          Description="Number of pages fetched in parallel"
+          Type="Variable" Display="advanced" Required="false" Mask="false">10</Config>
+
+  <Config Name="Respect robots.txt" Target="CRAWLER_RESPECT_ROBOTS" Default="true"
+          Mode="" Description="Honour robots.txt rules (recommended)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+
+  <Config Name="Block private addresses" Target="CRAWLER_BLOCK_PRIVATE" Default="true"
+          Mode="" Description="Refuse to crawl LAN/loopback/metadata addresses (recommended)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+</Container>

@@ -39,6 +39,18 @@ class Config:
     respect_robots: bool = True
     politeness_delay: float = 1.0  # seconds between hits to the same host
 
+    # Safety. Block fetches that resolve to private/loopback/link-local space so
+    # the crawler can't be steered into your LAN or cloud metadata endpoints.
+    block_private_addresses: bool = True
+
+    # JavaScript rendering (optional, requires Playwright + browsers installed).
+    render_js: bool = False
+    render_wait_ms: int = 1500  # extra settle time after page load
+
+    # Resumability / re-crawling.
+    resume: bool = True  # persist the frontier and resume pending URLs
+    recrawl_after_days: float = 0.0  # >0 re-queues docs older than this on crawl
+
     # Concurrency / limits.
     concurrency: int = 10
     max_pages: int = 10_000
@@ -92,6 +104,10 @@ class Config:
             "CRAWLER_REQUEST_TIMEOUT": ("request_timeout", int),
             "CRAWLER_RESPECT_ROBOTS": ("respect_robots", _as_bool),
             "CRAWLER_SAME_DOMAIN_ONLY": ("same_domain_only", _as_bool),
+            "CRAWLER_BLOCK_PRIVATE": ("block_private_addresses", _as_bool),
+            "CRAWLER_RENDER_JS": ("render_js", _as_bool),
+            "CRAWLER_RESUME": ("resume", _as_bool),
+            "CRAWLER_RECRAWL_AFTER_DAYS": ("recrawl_after_days", float),
         }
         for env, (attr, caster) in mapping.items():
             raw = os.environ.get(env)

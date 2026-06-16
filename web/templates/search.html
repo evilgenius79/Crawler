@@ -66,7 +66,7 @@
               {% if hit.content_type and hit.content_type != 'text/html' %}
                 <span class="badge">{{ hit.content_type }}</span>{% endif %}
             </div>
-            <div class="snippet">{{ hit.snippet|safe }}</div>
+            <div class="snippet">{{ hit.snippet|highlight }}</div>
           </div>
         {% endfor %}
 

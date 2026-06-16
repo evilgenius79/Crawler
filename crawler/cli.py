@@ -1,15 +1,19 @@
-"""Command line interface: crawl, search, serve, stats."""
+"""Command line interface: crawl, recrawl, schedule, search, serve, stats."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
+import os
 import sys
+import time
 
 from .config import Config
 from .crawler import WebCrawler
-from .index import Index
+from .index import HL_CLOSE, HL_OPEN, Index
+
+log = logging.getLogger("crawler.cli")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -18,20 +22,64 @@ def _build_parser() -> argparse.ArgumentParser:
         description="A personal web crawler + full-text search index.",
     )
     p.add_argument("-c", "--config", help="Path to a YAML config file")
-    p.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable debug logging"
-    )
+    p.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
     sub = p.add_subparsers(dest="command", required=True)
 
+    def add_crawl_flags(sp):
+        sp.add_argument("seeds", nargs="*", help="Seed URLs (override config)")
+        sp.add_argument("--max-pages", type=int)
+        sp.add_argument("--max-depth", type=int)
+        sp.add_argument("--concurrency", type=int)
+        sp.add_argument(
+            "--same-domain-only",
+            action="store_true",
+            help="Only follow links within the seed domains",
+        )
+        sp.add_argument(
+            "--render-js",
+            action="store_true",
+            help="Render pages with a headless browser (needs Playwright)",
+        )
+        sp.add_argument(
+            "--no-resume",
+            action="store_true",
+            help="Ignore the persisted frontier; start fresh",
+        )
+        sp.add_argument(
+            "--allow-private",
+            action="store_true",
+            help="Permit crawling private/loopback addresses (unsafe)",
+        )
+
     crawl = sub.add_parser("crawl", help="Crawl from seed URLs and build the index")
-    crawl.add_argument("seeds", nargs="*", help="Seed URLs (override config)")
-    crawl.add_argument("--max-pages", type=int)
-    crawl.add_argument("--max-depth", type=int)
-    crawl.add_argument("--concurrency", type=int)
-    crawl.add_argument(
-        "--same-domain-only",
-        action="store_true",
-        help="Only follow links within the seed domains",
+    add_crawl_flags(crawl)
+
+    recrawl = sub.add_parser(
+        "recrawl", help="Re-crawl documents older than N days (incremental update)"
+    )
+    add_crawl_flags(recrawl)
+    recrawl.add_argument(
+        "--older-than-days",
+        type=float,
+        default=7.0,
+        help="Re-crawl documents last fetched more than this many days ago",
+    )
+
+    schedule = sub.add_parser(
+        "schedule", help="Run a recurring crawl/recrawl on an interval"
+    )
+    add_crawl_flags(schedule)
+    schedule.add_argument(
+        "--interval",
+        type=float,
+        default=3600.0,
+        help="Seconds between runs (default: 3600)",
+    )
+    schedule.add_argument(
+        "--older-than-days",
+        type=float,
+        default=1.0,
+        help="On each run, re-crawl documents older than this many days",
     )
 
     search = sub.add_parser("search", help="Search the index from the terminal")
@@ -54,9 +102,38 @@ def _load_config(args) -> Config:
             setattr(cfg, attr, val)
     if getattr(args, "same_domain_only", False):
         cfg.same_domain_only = True
+    if getattr(args, "render_js", False):
+        cfg.render_js = True
+    if getattr(args, "no_resume", False):
+        cfg.resume = False
+    if getattr(args, "allow_private", False):
+        cfg.block_private_addresses = False
+    if getattr(args, "older_than_days", None) is not None:
+        cfg.recrawl_after_days = args.older_than_days
     if getattr(args, "seeds", None):
         cfg.seeds = args.seeds
     return cfg
+
+
+def _run_crawl(cfg: Config) -> int:
+    # A run needs *something* to do: seeds, a re-crawl window, or pending URLs
+    # left over from a previous resumable crawl. Reuse one Index for the check
+    # and the crawl so we don't open/bootstrap the DB twice per run.
+    index = Index(cfg.db_path)
+    has_pending = cfg.resume and bool(index.frontier_pending())
+    if not cfg.seeds and cfg.recrawl_after_days <= 0 and not has_pending:
+        index.close()
+        print("No seeds given. Pass URLs or set them in the config.", file=sys.stderr)
+        return 2
+    try:
+        summary = asyncio.run(WebCrawler(cfg, index=index).run())
+    finally:
+        index.close()
+    print(
+        f"Done: {summary['pages_crawled']} pages indexed, "
+        f"{summary['urls_seen']} URLs seen in {summary['elapsed_seconds']}s."
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,16 +144,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     cfg = _load_config(args)
 
-    if args.command == "crawl":
+    if args.command in ("crawl", "recrawl"):
+        return _run_crawl(cfg)
+
+    if args.command == "schedule":
         if not cfg.seeds:
-            print("No seeds given. Pass URLs or set them in the config.", file=sys.stderr)
+            print("Scheduling needs seed URLs.", file=sys.stderr)
             return 2
-        summary = asyncio.run(WebCrawler(cfg).run())
-        print(
-            f"Done: {summary['pages_crawled']} pages indexed, "
-            f"{summary['urls_seen']} URLs seen in {summary['elapsed_seconds']}s."
-        )
-        return 0
+        log.info("Scheduler started: every %.0fs", args.interval)
+        try:
+            while True:
+                _run_crawl(cfg)
+                log.info("Sleeping %.0fs until next run", args.interval)
+                time.sleep(args.interval)
+        except KeyboardInterrupt:
+            print("\nScheduler stopped.")
+            return 0
 
     if args.command == "search":
         index = Index(cfg.db_path)
@@ -86,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             print("No results.")
             return 0
         for i, hit in enumerate(hits, 1):
-            snippet = hit.snippet.replace("<mark>", "\033[1m").replace("</mark>", "\033[0m")
+            snippet = hit.snippet.replace(HL_OPEN, "\033[1m").replace(HL_CLOSE, "\033[0m")
             print(f"{i}. {hit.title}\n   {hit.url}\n   {snippet}\n")
         return 0
 
@@ -101,8 +184,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "serve":
         import uvicorn
-
-        import os
 
         os.environ["CRAWLER_DATA_DIR"] = cfg.data_dir
         uvicorn.run("web.app:app", host=args.host, port=args.port, log_level="info")

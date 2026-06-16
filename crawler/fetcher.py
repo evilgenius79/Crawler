@@ -5,6 +5,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import aiohttp
+from aiohttp.resolver import DefaultResolver
+
+from .security import _is_blocked_ip
+
+
+class SafeResolver(aiohttp.abc.AbstractResolver):
+    """A resolver that refuses to hand back private/loopback/reserved IPs.
+
+    Filtering at resolution (connect) time is what actually closes SSRF holes:
+    it covers redirects and DNS-rebinding, which a pre-request hostname check
+    cannot, because the connection only ever happens to a vetted address.
+    """
+
+    def __init__(self) -> None:
+        self._inner = DefaultResolver()
+
+    async def resolve(self, host, port=0, family=0):
+        infos = await self._inner.resolve(host, port, family)
+        safe = [i for i in infos if not _is_blocked_ip(i["host"])]
+        if not safe:
+            raise OSError(f"refusing to connect to private address for host {host!r}")
+        return safe
+
+    async def close(self) -> None:
+        await self._inner.close()
 
 
 @dataclass
@@ -29,9 +54,14 @@ class Fetcher:
 
     async def __aenter__(self) -> "Fetcher":
         timeout = aiohttp.ClientTimeout(total=self.config.request_timeout)
+        connector = None
+        if self.config.block_private_addresses:
+            # Block private addresses at connect time (covers redirects/rebinding).
+            connector = aiohttp.TCPConnector(resolver=SafeResolver())
         self._session = aiohttp.ClientSession(
             timeout=timeout,
             headers={"User-Agent": self.config.user_agent},
+            connector=connector,
         )
         return self
 

@@ -14,3 +14,7 @@ jinja2>=3.1
 
 # Config
 PyYAML>=6.0
+
+# Optional: JavaScript rendering (enable render_js). Heavy; install separately:
+#   pip install playwright && playwright install chromium
+# playwright>=1.43

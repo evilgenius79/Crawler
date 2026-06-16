@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import AsyncExitStack
 
+from . import security
 from .config import Config
 from .extractors import extract
 from .fetcher import Fetcher
 from .frontier import Frontier
 from .index import Index
+from .render import JSRenderer
 from .robots import RobotsCache
 from .utils import domain_of, normalize_url, registrable_suffix_match
 
@@ -20,6 +23,7 @@ log = logging.getLogger("crawler")
 class WebCrawler:
     def __init__(self, config: Config, index: Index | None = None) -> None:
         self.config = config
+        self._owns_index = index is None
         self.index = index or Index(config.db_path)
         self.frontier = Frontier()
         self._stop = asyncio.Event()
@@ -29,21 +33,35 @@ class WebCrawler:
         # Per-host serialisation + last-access time for politeness.
         self._host_locks: dict[str, asyncio.Lock] = {}
         self._host_last: dict[str, float] = {}
+        # Cache of host -> is-public so we resolve each host at most once.
+        self._host_safe: dict[str, bool] = {}
+
+        self._renderer: JSRenderer | None = None
 
     # ------------------------------------------------------------------ #
     async def run(self) -> dict:
+        try:
+            return await self._run()
+        finally:
+            if self._owns_index:
+                self.index.close()
+
+    async def _run(self) -> dict:
         seeds = [normalize_url(s) for s in self.config.seeds]
         seeds = [s for s in seeds if s]
-        if not seeds:
-            raise ValueError("No valid seed URLs configured")
+
+        self._restore_frontier(seeds)
+        if self.frontier.qsize() == 0:
+            log.info("Nothing to crawl (no seeds, pending, or stale URLs).")
+            return {"pages_crawled": 0, "urls_seen": 0, "elapsed_seconds": 0.0}
 
         start = time.time()
-        async with Fetcher(self.config) as fetcher:
+        async with AsyncExitStack() as stack:
+            fetcher = await stack.enter_async_context(Fetcher(self.config))
             self._fetcher = fetcher
             self._robots = RobotsCache(fetcher, self.config.user_agent)
-
-            for s in seeds:
-                self.frontier.add(s, 0)
+            if self.config.render_js:
+                self._renderer = await stack.enter_async_context(JSRenderer(self.config))
 
             workers = [
                 asyncio.create_task(self._worker(i))
@@ -63,6 +81,29 @@ class WebCrawler:
             "elapsed_seconds": round(elapsed, 1),
         }
 
+    def _restore_frontier(self, seeds: list[str]) -> None:
+        """Seed the frontier, resuming persisted state and re-queuing stale docs."""
+        # Re-crawling is inherently a persistent-frontier operation: it re-queues
+        # rows and relies on done-marking. Honour it even if the user passed
+        # --no-resume, otherwise the re-crawl would silently do nothing.
+        if self.config.recrawl_after_days > 0:
+            self.config.resume = True
+
+        if self.config.resume:
+            if self.config.recrawl_after_days > 0:
+                n = self.index.requeue_stale(self.config.recrawl_after_days * 86400)
+                if n:
+                    log.info("Re-queued %d documents for re-crawl", n)
+            pending = self.index.frontier_pending()
+            known = self.index.frontier_known_urls()
+            self.frontier.load(pending, known)
+            if pending:
+                log.info("Resuming with %d pending URLs from a previous crawl", len(pending))
+
+        fresh = [s for s in seeds if self.frontier.add(s, 0)]
+        if self.config.resume and fresh:
+            self.index.frontier_add_many([(s, 0) for s in fresh])
+
     # ------------------------------------------------------------------ #
     async def _worker(self, worker_id: int) -> None:
         while True:
@@ -78,17 +119,25 @@ class WebCrawler:
     async def _process(self, url: str, depth: int) -> None:
         if not self._in_scope(url):
             return
+        if not await self._host_is_safe(url):
+            log.debug("Blocked unsafe/private address: %s", url)
+            await self._persist_state(url, "error")
+            return
         if self.config.respect_robots and not await self._robots.allowed(url):
             log.debug("Blocked by robots.txt: %s", url)
+            await self._persist_state(url, "done")
             return
 
         await self._politeness_wait(url)
-        result = await self._fetcher.fetch(url)
+        result = await self._fetch(url)
         if not result.ok:
             log.debug("Fetch failed (%s): %s", result.status or result.error, url)
+            await self._persist_state(url, "error")
             return
 
-        # Index according to content type.
+        # Redirects to private hosts are already refused at connect time by the
+        # fetcher's SafeResolver, so a successful result here is from a vetted
+        # address; no second host check is needed.
         final_url = normalize_url(result.url) or url
         doc = extract(final_url, result.content_type, result.body)
         is_textual = result.content_type in self.config.textual_content_types or bool(
@@ -113,11 +162,37 @@ class WebCrawler:
             if done >= self.config.max_pages:
                 self._stop.set()
 
+        await self._persist_state(url, "done")
+
         # Expand the frontier with discovered links.
         if depth < self.config.max_depth and not self._stop.is_set():
-            for link in doc.links:
-                if self._in_scope(link):
-                    self.frontier.add(link, depth + 1)
+            new_links = [
+                link
+                for link in doc.links
+                if self._in_scope(link) and self.frontier.add(link, depth + 1)
+            ]
+            if self.config.resume and new_links:
+                await asyncio.to_thread(
+                    self.index.frontier_add_many, [(u, depth + 1) for u in new_links]
+                )
+
+    async def _fetch(self, url: str):
+        """Fetch over HTTP, optionally re-rendering HTML in a headless browser."""
+        result = await self._fetcher.fetch(url)
+        if (
+            self._renderer
+            and self._renderer.available
+            and result.ok
+            and result.content_type in ("text/html", "application/xhtml+xml")
+        ):
+            rendered = await self._renderer.fetch(url)
+            if rendered.ok:
+                return rendered
+        return result
+
+    async def _persist_state(self, url: str, state: str) -> None:
+        if self.config.resume:
+            await asyncio.to_thread(self.index.frontier_mark, url, state)
 
     # ------------------------------------------------------------------ #
     def _in_scope(self, url: str) -> bool:
@@ -135,6 +210,18 @@ class WebCrawler:
             seed_hosts = {domain_of(s) for s in self.config.seeds}
             return any(registrable_suffix_match(host, h) for h in seed_hosts if h)
         return True
+
+    async def _host_is_safe(self, url: str) -> bool:
+        if not self.config.block_private_addresses:
+            return True
+        host = domain_of(url)
+        cached = self._host_safe.get(host)
+        if cached is not None:
+            return cached
+        # DNS resolution blocks, so run it off the event loop.
+        safe = await asyncio.to_thread(security.url_is_safe, url)
+        self._host_safe[host] = safe
+        return safe
 
     async def _politeness_wait(self, url: str) -> None:
         host = domain_of(url)
