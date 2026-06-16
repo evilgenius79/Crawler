@@ -143,12 +143,29 @@ class Index:
             (url, title, content, content_type, time.time(), depth, size),
         )
 
-    def search(self, query: str, limit: int = 20, offset: int = 0) -> list[SearchHit]:
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        offset: int = 0,
+        content_type_like: str | None = None,
+    ) -> list[SearchHit]:
         match = _to_fts_query(query)
         if not match:
             return []
+        params = {
+            "match": match,
+            "limit": limit,
+            "offset": offset,
+            "hl_open": HL_OPEN,
+            "hl_close": HL_CLOSE,
+        }
+        type_clause = ""
+        if content_type_like:
+            type_clause = " AND d.content_type LIKE :ctype"
+            params["ctype"] = content_type_like
         rows = self._query(
-            """
+            f"""
             SELECT
                 d.url AS url,
                 d.title AS title,
@@ -157,17 +174,11 @@ class Index:
                 bm25(docs_fts, 5.0, 1.0) AS score
             FROM docs_fts
             JOIN docs d ON d.id = docs_fts.rowid
-            WHERE docs_fts MATCH :match
+            WHERE docs_fts MATCH :match{type_clause}
             ORDER BY score
             LIMIT :limit OFFSET :offset
             """,
-            {
-                "match": match,
-                "limit": limit,
-                "offset": offset,
-                "hl_open": HL_OPEN,
-                "hl_close": HL_CLOSE,
-            },
+            params,
         )
         return [
             SearchHit(
@@ -180,13 +191,22 @@ class Index:
             for r in rows
         ]
 
-    def count_matches(self, query: str) -> int:
+    def count_matches(self, query: str, content_type_like: str | None = None) -> int:
         match = _to_fts_query(query)
         if not match:
             return 0
+        params = {"match": match}
+        type_clause = ""
+        if content_type_like:
+            type_clause = " AND d.content_type LIKE :ctype"
+            params["ctype"] = content_type_like
         rows = self._query(
-            "SELECT COUNT(*) AS n FROM docs_fts WHERE docs_fts MATCH ?",
-            (match,),
+            f"""
+            SELECT COUNT(*) AS n
+            FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid
+            WHERE docs_fts MATCH :match{type_clause}
+            """,
+            params,
         )
         return int(rows[0]["n"])
 

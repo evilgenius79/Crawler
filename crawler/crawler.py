@@ -38,6 +38,40 @@ class WebCrawler:
         self._host_safe: dict[str, bool] = {}
 
         self._renderer: JSRenderer | None = None
+        self._start_time: float | None = None
+
+    # ------------------------------------------------------------------ #
+    # Live control surface (used by the web admin dashboard)
+    # ------------------------------------------------------------------ #
+    def stop(self) -> None:
+        """Signal the crawl to wind down; in-flight workers drain the queue."""
+        self._stop.set()
+
+    @property
+    def stopping(self) -> bool:
+        return self._stop.is_set()
+
+    def status(self) -> dict:
+        elapsed = (time.time() - self._start_time) if self._start_time else 0.0
+        return {
+            "pages_indexed": self._pages_done,
+            "errors": self._errors,
+            "queued": self.frontier.qsize(),
+            "seen": self.frontier.seen_count,
+            "elapsed_seconds": round(elapsed, 1),
+            "stopping": self._stop.is_set(),
+        }
+
+    async def add_urls(self, urls: list[str], depth: int = 0) -> int:
+        """Inject URLs into a running (or about-to-run) crawl's frontier."""
+        new: list[tuple[str, int]] = []
+        for u in urls:
+            n = normalize_url(u)
+            if n and self.frontier.add(n, depth):
+                new.append((n, depth))
+        if new and self.config.resume:
+            await asyncio.to_thread(self.index.frontier_add_many, new)
+        return len(new)
 
     # ------------------------------------------------------------------ #
     async def run(self) -> dict:
@@ -73,7 +107,7 @@ class WebCrawler:
 
             workers = [
                 asyncio.create_task(self._worker(i))
-                for i in range(self.config.concurrency)
+                for i in range(max(1, self.config.concurrency))
             ]
             reporter = asyncio.create_task(self._progress_reporter())
             await self.frontier.join()

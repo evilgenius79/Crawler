@@ -122,6 +122,37 @@ def test_safe_snippet_escapes_page_html(monkeypatch):
         assert "<mark>" in api_snip
 
 
+def test_index_filetype_filter():
+    with tempfile.TemporaryDirectory() as d:
+        idx = Index(os.path.join(d, "t.db"))
+        idx.upsert("u1", "A", "python alpha", "text/html", 0, 1)
+        idx.upsert("u2", "B", "python beta", "application/pdf", 0, 1)
+        idx.upsert("u3", "C", "python gamma", "image/png", 0, 1)
+        assert idx.count_matches("python") == 3
+        assert idx.count_matches("python", content_type_like="application/pdf%") == 1
+        hits = idx.search("python", content_type_like="image/%")
+        assert len(hits) == 1 and hits[0].content_type == "image/png"
+        idx.close()
+
+
+def test_parse_query_filetype(monkeypatch):
+    with tempfile.TemporaryDirectory() as d:
+        monkeypatch.setenv("CRAWLER_DATA_DIR", d)
+        import importlib
+
+        import web.app as app
+
+        importlib.reload(app)
+        clean, ftype, like = app._parse_query("invoice type:pdf", "")
+        assert clean == "invoice" and ftype == "pdf" and like == "application/pdf%"
+        # A dropdown/chip selection works too.
+        _, ftype2, like2 = app._parse_query("cat", "image")
+        assert ftype2 == "image" and like2 == "image/%"
+        # Unknown type token is left in the query, not treated as a filter.
+        clean3, ftype3, like3 = app._parse_query("type:bogus hello", "")
+        assert "type:bogus" in clean3 and ftype3 == "" and like3 is None
+
+
 def test_blocked_ip_ranges():
     assert security._is_blocked_ip("127.0.0.1")
     assert security._is_blocked_ip("10.1.2.3")

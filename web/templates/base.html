@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}PersonalSearch{% endblock %}</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg-2: #161b22;
+      --surface: #1c2330;
+      --border: #2d333b;
+      --border-2: #3a4250;
+      --fg: #e6edf3;
+      --muted: #9aa4b2;
+      --faint: #6e7681;
+      --accent: #6366f1;
+      --accent-2: #818cf8;
+      --link: #7aa2ff;
+      --url: #4ade80;
+      --good: #34d399;
+      --bad: #f87171;
+      --warn: #fbbf24;
+      --radius: 14px;
+      --shadow: 0 8px 30px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 600px at 50% -200px, #1b2436 0%, var(--bg) 60%);
+      color: var(--fg);
+      font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    mark { background: rgba(129,140,248,.28); color: #eef0ff; border-radius: 3px; padding: 0 2px; }
+
+    /* Top bar */
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      display: flex; align-items: center; gap: 18px;
+      padding: 12px 22px;
+      background: rgba(13,17,23,.82);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 750; font-size: 17px; letter-spacing: -.3px; }
+    .brand .dot { width: 22px; height: 22px; border-radius: 7px;
+      background: linear-gradient(135deg, var(--accent), #22d3ee); box-shadow: 0 0 18px rgba(99,102,241,.6); }
+    .brand b { color: var(--accent-2); }
+    .nav { display: flex; gap: 6px; margin-left: 6px; }
+    .nav a { color: var(--muted); padding: 6px 12px; border-radius: 9px; font-weight: 600; font-size: 14px; }
+    .nav a:hover { color: var(--fg); background: var(--bg-2); text-decoration: none; }
+    .nav a.active { color: var(--fg); background: var(--surface); }
+    .spacer { flex: 1; }
+
+    .pill { display: inline-flex; align-items: center; gap: 7px;
+      font-size: 12.5px; font-weight: 600; color: var(--muted);
+      padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-2); }
+    .pill .led { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
+    .pill.live .led { background: var(--good); box-shadow: 0 0 10px var(--good); animation: pulse 1.4s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+
+    main { max-width: 860px; margin: 0 auto; padding: 26px 20px 80px; }
+
+    /* Inputs / buttons */
+    input, textarea, select, button { font: inherit; color: var(--fg); }
+    .field {
+      width: 100%; padding: 12px 16px; background: var(--bg-2);
+      border: 1px solid var(--border-2); border-radius: 12px; outline: none;
+    }
+    .field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+    textarea.field { resize: vertical; min-height: 84px; }
+    .btn { cursor: pointer; border: 1px solid var(--border-2); background: var(--surface);
+      padding: 11px 18px; border-radius: 12px; font-weight: 650; transition: .15s; }
+    .btn:hover { border-color: var(--accent); }
+    .btn.primary { background: linear-gradient(135deg, var(--accent), #4f46e5); border-color: transparent; color: #fff; }
+    .btn.primary:hover { filter: brightness(1.08); }
+    .btn.danger { color: #fff; background: linear-gradient(135deg, #ef4444, #b91c1c); border-color: transparent; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    .card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+    .muted { color: var(--muted); }
+    .footer { text-align: center; color: var(--faint); font-size: 12.5px; padding: 36px 0 0; }
+
+    {% block style %}{% endblock %}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="dot"></span>Personal<b>Search</b></a>
+    <nav class="nav">
+      <a href="/" class="{% block nav_search %}{% endblock %}">Search</a>
+      <a href="/admin" class="{% block nav_admin %}{% endblock %}">Admin</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="pill" id="crawl-pill"><span class="led"></span><span id="crawl-pill-text">idle</span></span>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+
+  <script>
+    // Live crawl indicator in the top bar, on every page.
+    async function refreshPill() {
+      try {
+        const r = await fetch('/api/crawl/status', {cache: 'no-store'});
+        const s = await r.json();
+        const pill = document.getElementById('crawl-pill');
+        const text = document.getElementById('crawl-pill-text');
+        if (s.running) {
+          pill.classList.add('live');
+          text.textContent = `crawling · ${s.pages_indexed||0} indexed · ${s.queued||0} queued`;
+        } else {
+          pill.classList.remove('live');
+          text.textContent = `idle · ${(s.stats&&s.stats.total_documents)||0} docs`;
+        }
+        if (window.onCrawlStatus) window.onCrawlStatus(s);
+      } catch (e) { /* ignore */ }
+    }
+    refreshPill();
+    setInterval(refreshPill, 2000);
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

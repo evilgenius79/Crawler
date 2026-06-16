@@ -13,10 +13,18 @@ on unraid). No Docker required — it's just Python.
 
 ## Everyday use
 
+**The easy way:** double-click **`start-search.bat`**, open
+<http://localhost:8000>, click **Admin**, paste seed URLs and press
+**Start crawl**. You control everything (start/stop, add URLs, live status) from
+the browser — no second window needed. Keep the `start-search.bat` window open
+while you want search + crawling available.
+
+The `.bat` files below are optional command-line alternatives:
+
 | Script | What it does |
 |--------|--------------|
-| `start-search.bat` | Launches the search UI at <http://localhost:8000>. Keep the window open. |
-| `crawl.bat` | Crawls site(s), following links outward. Double-click it and it asks for the URL(s), or pass them: `crawl.bat https://example.com`. |
+| `start-search.bat` | Launches the web UI + admin at <http://localhost:8000>. |
+| `crawl.bat` | Crawls site(s) from the command line. Double-click and it asks for URL(s), or pass them: `crawl.bat https://example.com`. |
 | `recrawl.bat` | Re-fetches anything older than a day (used by the scheduled task). |
 
 Examples (from a Command Prompt in this folder, or just double-click):

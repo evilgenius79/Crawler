@@ -1,87 +1,85 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% if q %}{{ q }} — {% endif %}Personal Search</title>
-  <style>
-    :root { --accent: #4f7cff; --bg: #fff; --fg: #202124; --muted: #5f6368; --link: #1a0dab; --url: #006621; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg: #1b1c1d; --fg: #e8eaed; --muted: #9aa0a6; --link: #8ab4f8; --url: #6ee07a; }
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-           background: var(--bg); color: var(--fg); }
-    a { color: var(--link); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    mark { background: #fff2a8; color: inherit; padding: 0 1px; border-radius: 2px; }
-    @media (prefers-color-scheme: dark) { mark { background: #5c5300; } }
+{% extends "base.html" %}
+{% block title %}{% if q %}{{ q }} — {% endif %}PersonalSearch{% endblock %}
+{% block nav_search %}active{% endblock %}
 
-    .wrap { max-width: 720px; margin: 0 auto; padding: 0 20px; }
-    header { padding: {% if q %}18px 0{% else %}18vh 0 0{% endif %}; }
-    .brand { font-size: {% if q %}26px{% else %}44px{% endif %}; font-weight: 700;
-             text-align: {% if q %}left{% else %}center{% endif %}; letter-spacing: -1px; }
-    .brand span { color: var(--accent); }
+{% block style %}
+  .hero { text-align: center; padding: 14vh 0 0; }
+  .hero h1 { font-size: 46px; font-weight: 800; letter-spacing: -1.5px; margin: 0 0 6px; }
+  .hero h1 b { color: var(--accent-2); }
+  .hero p { color: var(--muted); margin: 0 0 26px; }
 
-    form { display: flex; gap: 8px; margin: 18px 0; }
-    input[type=search] { flex: 1; font-size: 17px; padding: 12px 18px;
-        border: 1px solid #dfe1e5; border-radius: 24px; outline: none;
-        background: var(--bg); color: var(--fg); }
-    input[type=search]:focus { box-shadow: 0 1px 6px rgba(32,33,36,.28); border-color: transparent; }
-    button { font-size: 15px; padding: 0 22px; border: none; border-radius: 24px;
-        background: var(--accent); color: #fff; cursor: pointer; }
+  .searchbar { display: flex; gap: 10px; }
+  .searchbar input { font-size: 16.5px; border-radius: 999px; padding: 14px 20px; }
+  .searchbar button { border-radius: 999px; padding: 0 24px; }
 
-    .meta { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
-    .result { margin-bottom: 26px; }
-    .result .url { color: var(--url); font-size: 13px; word-break: break-all; }
-    .result .title { font-size: 19px; margin: 2px 0 4px; }
-    .result .snippet { color: var(--muted); font-size: 14px; line-height: 1.5; }
-    .badge { display: inline-block; font-size: 11px; color: var(--muted);
-        border: 1px solid var(--muted); border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 4px; }
+  .chip { font-size: 13px; font-weight: 600; color: var(--muted); padding: 6px 13px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--bg-2); cursor: pointer; }
+  .chip:hover { color: var(--fg); border-color: var(--border-2); text-decoration: none; }
+  .chip.active { color: #fff; background: linear-gradient(135deg, var(--accent), #4f46e5); border-color: transparent; }
 
-    .pager { display: flex; gap: 14px; justify-content: center; margin: 30px 0; }
-    .empty { color: var(--muted); margin: 40px 0; text-align: center; }
-    footer { text-align: center; color: var(--muted); font-size: 12px; padding: 40px 0; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <div class="brand">Personal<span>Search</span></div>
-      <form action="/" method="get" role="search">
-        <input type="search" name="q" value="{{ q|e }}" placeholder="Search your index…"
-               autofocus autocomplete="off" />
-        <button type="submit">Search</button>
-      </form>
-    </header>
+  .meta { color: var(--muted); font-size: 13px; margin: 18px 2px 14px; }
+  .result { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .result:last-child { border-bottom: none; }
+  .result .url { color: var(--url); font-size: 12.5px; word-break: break-all; opacity: .9; }
+  .result .title { font-size: 18.5px; font-weight: 650; margin: 3px 0 5px; }
+  .result .snippet { color: var(--muted); font-size: 14px; }
+  .badge { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+    color: var(--accent-2); background: rgba(99,102,241,.14); border: 1px solid rgba(99,102,241,.3);
+    border-radius: 6px; padding: 1px 7px; margin-left: 8px; vertical-align: middle; }
 
-    {% if q %}
-      {% if hits %}
-        <div class="meta">About {{ total }} result{{ '' if total == 1 else 's' }}
-          (page {{ page }} of {{ total_pages }})</div>
-        {% for hit in hits %}
-          <div class="result">
-            <div class="url">{{ hit.url }}</div>
-            <div class="title"><a href="{{ hit.url }}" rel="noopener noreferrer">{{ hit.title }}</a>
-              {% if hit.content_type and hit.content_type != 'text/html' %}
-                <span class="badge">{{ hit.content_type }}</span>{% endif %}
-            </div>
-            <div class="snippet">{{ hit.snippet|highlight }}</div>
-          </div>
-        {% endfor %}
+  .pager { display: flex; gap: 12px; justify-content: center; margin: 30px 0 0; }
+  .pager a { padding: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); }
+  .empty { text-align: center; color: var(--muted); margin: 50px 0; }
+{% endblock %}
 
-        <div class="pager">
-          {% if page > 1 %}<a href="/?q={{ q|urlencode }}&page={{ page - 1 }}">← Prev</a>{% endif %}
-          {% if page < total_pages %}<a href="/?q={{ q|urlencode }}&page={{ page + 1 }}">Next →</a>{% endif %}
-        </div>
-      {% else %}
-        <div class="empty">No results for <strong>{{ q|e }}</strong>.</div>
-      {% endif %}
-    {% else %}
-      <div class="empty">{{ stats.total_documents }} documents indexed and ready to search.</div>
-    {% endif %}
-
-    <footer>PersonalSearch · {{ stats.total_documents }} docs indexed</footer>
+{% block content %}
+  {% if not q %}
+  <div class="hero">
+    <h1>Personal<b>Search</b></h1>
+    <p>Your own corner of the web — {{ stats.total_documents }} documents indexed, no ads.</p>
   </div>
-</body>
-</html>
+  {% endif %}
+
+  <form action="/" method="get" class="searchbar" role="search">
+    <input class="field" type="search" name="q" value="{{ q|e }}"
+           placeholder="Search the index…   (tip: add type:pdf)"
+           autocomplete="off" autofocus />
+    <input type="hidden" name="type" value="{{ ftype|e }}" />
+    <button class="btn primary" type="submit">Search</button>
+  </form>
+
+  <div class="chips">
+    {% for value, label in chips %}
+      <a class="chip {% if value == ftype %}active{% endif %}"
+         href="/?q={{ q|urlencode }}&type={{ value }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if q %}
+    {% if hits %}
+      <div class="meta">{{ total }} result{{ '' if total == 1 else 's' }}
+        {% if ftype %}in <b>{{ ftype }}</b>{% endif %} · page {{ page }} of {{ total_pages }}</div>
+      {% for hit in hits %}
+        <div class="result">
+          <div class="url">{{ hit.url }}</div>
+          <div class="title">
+            <a href="{{ hit.url }}" rel="noopener noreferrer">{{ hit.title }}</a>
+            {% if hit.content_type and hit.content_type != 'text/html' %}
+              <span class="badge">{{ hit.content_type.split('/')[-1][:18] }}</span>{% endif %}
+          </div>
+          <div class="snippet">{{ hit.snippet|highlight }}</div>
+        </div>
+      {% endfor %}
+
+      <div class="pager">
+        {% if page > 1 %}<a href="/?q={{ q|urlencode }}&type={{ ftype }}&page={{ page-1 }}">← Prev</a>{% endif %}
+        {% if page < total_pages %}<a href="/?q={{ q|urlencode }}&type={{ ftype }}&page={{ page+1 }}">Next →</a>{% endif %}
+      </div>
+    {% else %}
+      <div class="empty">No results for <b>{{ q|e }}</b>{% if ftype %} in <b>{{ ftype }}</b>{% endif %}.</div>
+    {% endif %}
+  {% endif %}
+
+  <div class="footer">PersonalSearch · {{ stats.total_documents }} documents indexed</div>
+{% endblock %}

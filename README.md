@@ -5,20 +5,23 @@ seed URLs, let it crawl, then search your own corner of the web from a clean,
 ad-free, Google-style UI. Designed to run happily on an unraid box (or any
 Docker host).
 
+- **Polished dark web UI** with a built-in **admin dashboard** — start/stop
+  crawls, add URLs, and watch live status right from the browser
 - **Async crawler** (aiohttp) — many pages in flight at once, polite per host
+- **Crawls the open web** — follows links from site to site by default
 - **Crawls everything** — HTML, PDF, DOCX and plain text get full-text indexed;
   every other file type is still indexed by URL/type/size so nothing is lost
+- **File-type search** — filter results to PDFs, docs, images, etc.
 - **Optional JavaScript rendering** via a headless browser (Playwright)
 - **Resumable** — the frontier is persisted, so an interrupted crawl picks up
   where it left off
 - **Incremental & scheduled re-crawling** — keep the index fresh automatically
 - **SSRF-hardened** — refuses to crawl private/loopback/cloud-metadata addresses
 - **Zero external services** — the index is a single SQLite file using FTS5
-- **BM25 ranked search** with highlighted snippets, a JSON API, and a web UI
-- **robots.txt aware**, with configurable politeness, scope and depth limits
+- **BM25 ranked search** with highlighted snippets and a JSON API
 
-> Built for personal/research use. Crawl responsibly: set a real `user_agent`,
-> keep `respect_robots: true`, and be considerate with `politeness_delay`.
+> Built for personal/research use. Crawl responsibly: be considerate with
+> `politeness_delay`, and note that robots.txt is ignored by default.
 
 ## Architecture
 
@@ -172,19 +175,47 @@ the full walkthrough):
 2. Get the code: `git clone https://github.com/evilgenius79/crawler.git` (or
    download the ZIP) and open the folder.
 3. Double-click **`windows\setup.bat`** to create a venv and install deps.
-4. Crawl: **`windows\crawl.bat https://example.com`**
-5. Search: **`windows\start-search.bat`** → open <http://localhost:8000>.
+4. Double-click **`windows\start-search.bat`** → open <http://localhost:8000>.
+5. Click **Admin**, paste some seed URLs, and hit **Start crawl**. Watch the
+   live status, then search from the home page as the index fills up.
+
+That's the whole loop from one window — no separate scan command needed.
+Prefer the command line? `windows\crawl.bat https://example.com` still works.
 
 To run it unattended, import the included Task Scheduler tasks
 (`windows\PersonalSearch-WebUI.xml` to auto-start the UI at logon,
 `windows\PersonalSearch-Recrawl.xml` for a daily re-crawl) after editing the
 folder paths inside them.
 
+## Web admin dashboard
+
+Run the server (`python -m crawler serve`, or `windows\start-search.bat`) and
+open **http://localhost:8000** — then click **Admin** in the top bar. From there
+you can, without touching the command line:
+
+- **Start a crawl** — paste seed URLs, tweak limits (max pages/depth/workers) and
+  toggles (stay-on-domain, respect robots, render JS), and hit *Start*.
+- **Watch live status** — indexed / queued / errors / pages-per-second update
+  every couple of seconds, with a progress bar and a content-type breakdown.
+- **Add URLs to a running crawl**, or **Stop** it.
+
+So you only ever need to launch **one** thing (the web server); the crawling is
+driven from the page. A live status pill in the header shows crawl activity on
+every page. Set `CRAWLER_AUTOSTART=true` (with seeds configured) to kick off a
+crawl automatically when the server starts.
+
+The same actions are available as a JSON API: `POST /api/crawl/start`,
+`/api/crawl/add`, `/api/crawl/stop`, and `GET /api/crawl/status`.
+
 ## Search syntax
 
 Queries are tokenised and AND-ed, so `python async tutorial` finds documents
 containing all three words. Ranking is BM25 with extra weight on titles, and
 matches are highlighted in the snippet.
+
+**Filter by file type** with the chips under the search box, or inline in the
+query: `invoice type:pdf`, `cat type:image`, `resume type:doc`. Supported types
+are `web`, `pdf`, `doc`, `text`, `image`, `audio`, `video`, `archive`.
 
 ## Security
 
