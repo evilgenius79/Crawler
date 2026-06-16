@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Crawler data / index
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local config
+config.yaml
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store

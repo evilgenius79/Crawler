@@ -1,0 +1,32 @@
+# Copy to config.yaml and edit. All values are optional; sensible defaults apply.
+# Pass with:  python -m crawler -c config.yaml crawl
+
+# URLs to start crawling from.
+seeds:
+  - https://example.com
+
+# Where the SQLite index lives (index.db is created inside this folder).
+data_dir: ./data
+
+# Identity sent to servers. Put a real contact URL here if crawling the open web.
+user_agent: "PersonalCrawler/0.1 (+https://github.com/youruser/crawler)"
+
+# Politeness.
+respect_robots: true
+politeness_delay: 1.0      # seconds between requests to the same host
+
+# Throughput / limits.
+concurrency: 10
+max_pages: 10000
+max_depth: 5
+request_timeout: 20
+max_content_bytes: 10485760   # 10 MiB hard cap per response
+
+# Scope. Leave allowed_domains empty to crawl the whole open web from the seeds.
+same_domain_only: false
+allowed_domains: []          # e.g. ["example.com", "docs.example.com"]
+blocked_domains: []          # e.g. ["facebook.com", "ads.example.com"]
+
+# Indexing. Keep metadata for binaries (images, zips, etc.) so they are
+# searchable by URL/type even when no text can be extracted.
+index_all_types: true

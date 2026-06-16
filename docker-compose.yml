@@ -1,0 +1,25 @@
+services:
+  # The search UI. This is the long-running service for your unraid server.
+  search:
+    build: .
+    image: personal-crawler:latest
+    container_name: personal-search
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      CRAWLER_DATA_DIR: /data
+
+  # One-off crawl runner. Start it with an explicit profile so it does not run
+  # by default:  docker compose run --rm crawl https://example.com
+  crawl:
+    build: .
+    image: personal-crawler:latest
+    profiles: ["tools"]
+    volumes:
+      - ./data:/data
+    environment:
+      CRAWLER_DATA_DIR: /data
+    entrypoint: ["python", "-m", "crawler", "crawl"]
