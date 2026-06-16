@@ -38,7 +38,12 @@ def _build_parser() -> argparse.ArgumentParser:
         sp.add_argument(
             "--ignore-robots",
             action="store_true",
-            help="Do not fetch or obey robots.txt (be considerate; use politeness-delay)",
+            help="Do not fetch or obey robots.txt (this is the default)",
+        )
+        sp.add_argument(
+            "--respect-robots",
+            action="store_true",
+            help="Fetch and obey robots.txt rules",
         )
         sp.add_argument(
             "--render-js",
@@ -109,6 +114,8 @@ def _load_config(args) -> Config:
         cfg.same_domain_only = True
     if getattr(args, "ignore_robots", False):
         cfg.respect_robots = False
+    if getattr(args, "respect_robots", False):
+        cfg.respect_robots = True
     if getattr(args, "render_js", False):
         cfg.render_js = True
     if getattr(args, "no_resume", False):
@@ -138,6 +145,7 @@ def _run_crawl(cfg: Config) -> int:
         index.close()
     print(
         f"Done: {summary['pages_crawled']} pages indexed, "
+        f"{summary.get('errors', 0)} errors, "
         f"{summary['urls_seen']} URLs seen in {summary['elapsed_seconds']}s."
     )
     return 0

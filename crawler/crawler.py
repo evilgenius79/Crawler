@@ -28,6 +28,7 @@ class WebCrawler:
         self.frontier = Frontier()
         self._stop = asyncio.Event()
         self._pages_done = 0
+        self._errors = 0
         self._counter_lock = asyncio.Lock()
 
         # Per-host serialisation + last-access time for politeness.
@@ -56,6 +57,13 @@ class WebCrawler:
             return {"pages_crawled": 0, "urls_seen": 0, "elapsed_seconds": 0.0}
 
         start = time.time()
+        self._start_time = start
+        log.info(
+            "Starting crawl: %d URLs queued, concurrency=%d, robots=%s",
+            self.frontier.qsize(),
+            self.config.concurrency,
+            "on" if self.config.respect_robots else "off",
+        )
         async with AsyncExitStack() as stack:
             fetcher = await stack.enter_async_context(Fetcher(self.config))
             self._fetcher = fetcher
@@ -67,19 +75,48 @@ class WebCrawler:
                 asyncio.create_task(self._worker(i))
                 for i in range(self.config.concurrency)
             ]
+            reporter = asyncio.create_task(self._progress_reporter())
             await self.frontier.join()
             self._stop.set()
             for w in workers:
                 w.cancel()
-            await asyncio.gather(*workers, return_exceptions=True)
+            reporter.cancel()
+            await asyncio.gather(*workers, reporter, return_exceptions=True)
 
         elapsed = time.time() - start
-        log.info("Crawl finished: %d pages in %.1fs", self._pages_done, elapsed)
+        log.info(
+            "Crawl finished: %d pages indexed, %d errors, %.1fs",
+            self._pages_done,
+            self._errors,
+            elapsed,
+        )
         return {
             "pages_crawled": self._pages_done,
             "urls_seen": self.frontier.seen_count,
+            "errors": self._errors,
             "elapsed_seconds": round(elapsed, 1),
         }
+
+    async def _progress_reporter(self) -> None:
+        """Print a heartbeat every few seconds so you can see the crawl is alive."""
+        last_done = 0
+        last_t = self._start_time
+        try:
+            while True:
+                await asyncio.sleep(self.config.progress_interval)
+                now = time.time()
+                done = self._pages_done
+                rate = (done - last_done) / (now - last_t) if now > last_t else 0.0
+                log.info(
+                    "progress: %d indexed | %d queued | %d errors | %.1f pages/s",
+                    done,
+                    self.frontier.qsize(),
+                    self._errors,
+                    rate,
+                )
+                last_done, last_t = done, now
+        except asyncio.CancelledError:
+            pass
 
     def _restore_frontier(self, seeds: list[str]) -> None:
         """Seed the frontier, resuming persisted state and re-queuing stale docs."""
@@ -132,6 +169,7 @@ class WebCrawler:
         result = await self._fetch(url)
         if not result.ok:
             log.debug("Fetch failed (%s): %s", result.status or result.error, url)
+            self._errors += 1
             await self._persist_state(url, "error")
             return
 
@@ -157,8 +195,7 @@ class WebCrawler:
             async with self._counter_lock:
                 self._pages_done += 1
                 done = self._pages_done
-            if done % 25 == 0:
-                log.info("Indexed %d pages (queue=%d)", done, self.frontier.qsize())
+            # Per-second progress is emitted by _progress_reporter.
             if done >= self.config.max_pages:
                 self._stop.set()
 

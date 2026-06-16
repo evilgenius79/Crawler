@@ -36,8 +36,13 @@ class Config:
     user_agent: str = (
         "PersonalCrawler/0.1 (+https://github.com/; personal indexing bot)"
     )
-    respect_robots: bool = True
+    # robots.txt is off by default for this personal crawler. Politeness still
+    # applies; be considerate (and mind site Terms of Service).
+    respect_robots: bool = False
     politeness_delay: float = 1.0  # seconds between hits to the same host
+
+    # How often (seconds) to print a progress heartbeat while crawling.
+    progress_interval: float = 5.0
 
     # Safety. Block fetches that resolve to private/loopback/link-local space so
     # the crawler can't be steered into your LAN or cloud metadata endpoints.

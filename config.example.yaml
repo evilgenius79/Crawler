@@ -11,9 +11,11 @@ data_dir: ./data
 # Identity sent to servers. Put a real contact URL here if crawling the open web.
 user_agent: "PersonalCrawler/0.1 (+https://github.com/youruser/crawler)"
 
-# Politeness.
-respect_robots: true
+# Politeness. robots.txt is OFF by default for this personal crawler; set true
+# to honour it. Keep politeness_delay sane regardless to avoid hammering servers.
+respect_robots: false
 politeness_delay: 1.0      # seconds between requests to the same host
+progress_interval: 5.0     # seconds between progress heartbeat lines while crawling
 
 # Throughput / limits.
 concurrency: 10
