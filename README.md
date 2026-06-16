@@ -147,6 +147,25 @@ Even with robots disabled, keep `politeness_delay` sane — hammering a server i
 how you get IP-banned (and how a crawl starts to look like an attack). Note that
 many sites' Terms of Service still forbid scraping regardless of robots.txt.
 
+## Running on Windows
+
+No Docker needed — it's just Python. Ready-made scripts live in the
+[`windows/`](windows/) folder (see [`windows/README.md`](windows/README.md) for
+the full walkthrough):
+
+1. Install **Python 3.11+** from <https://www.python.org/downloads/> (tick
+   *"Add python.exe to PATH"*).
+2. Get the code: `git clone https://github.com/evilgenius79/crawler.git` (or
+   download the ZIP) and open the folder.
+3. Double-click **`windows\setup.bat`** to create a venv and install deps.
+4. Crawl: **`windows\crawl.bat https://example.com`**
+5. Search: **`windows\start-search.bat`** → open <http://localhost:8000>.
+
+To run it unattended, import the included Task Scheduler tasks
+(`windows\PersonalSearch-WebUI.xml` to auto-start the UI at logon,
+`windows\PersonalSearch-Recrawl.xml` for a daily re-crawl) after editing the
+folder paths inside them.
+
 ## Search syntax
 
 Queries are tokenised and AND-ed, so `python async tutorial` finds documents

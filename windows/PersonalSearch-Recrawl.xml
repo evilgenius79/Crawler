@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Task Scheduler task: re-crawl the index daily at 3:00 AM to keep it fresh.
+
+  BEFORE IMPORTING, edit the two paths near the bottom (<Command> and
+  <WorkingDirectory>) to point at where you put the crawler folder.
+
+  Import: Task Scheduler -> Action -> Import Task... -> pick this file.
+  (Or:  schtasks /create /tn "PersonalSearch Recrawl" /xml PersonalSearch-Recrawl.xml )
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Daily incremental re-crawl of the PersonalSearch index.</Description>
+    <URI>\PersonalSearch Recrawl</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T03:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <ExecutionTimeLimit>PT12H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <!-- EDIT THIS PATH to your crawler folder -->
+      <Command>C:\path\to\crawler\windows\recrawl.bat</Command>
+      <WorkingDirectory>C:\path\to\crawler</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
