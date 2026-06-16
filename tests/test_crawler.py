@@ -153,6 +153,28 @@ def test_parse_query_filetype(monkeypatch):
         assert "type:bogus" in clean3 and ftype3 == "" and like3 is None
 
 
+def test_crawl_history():
+    with tempfile.TemporaryDirectory() as d:
+        idx = Index(os.path.join(d, "t.db"))
+        rid = idx.record_crawl_start(["https://x"], 100, 5)
+        assert isinstance(rid, int)
+        recent = idx.recent_crawls()
+        assert len(recent) == 1
+        assert recent[0]["status"] == "running"
+        assert recent[0]["seeds"] == ["https://x"]
+
+        idx.record_crawl_finish(rid, "finished", 10, 2)
+        recent = idx.recent_crawls()
+        assert recent[0]["status"] == "finished"
+        assert recent[0]["pages_indexed"] == 10 and recent[0]["errors"] == 2
+
+        # A leftover 'running' row from a crash is flagged on restart.
+        idx.record_crawl_start(["https://y"], 1, 1)
+        assert idx.mark_running_interrupted() == 1
+        assert all(r["status"] != "running" for r in idx.recent_crawls())
+        idx.close()
+
+
 def test_blocked_ip_ranges():
     assert security._is_blocked_ip("127.0.0.1")
     assert security._is_blocked_ip("10.1.2.3")

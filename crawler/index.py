@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 import threading
@@ -73,6 +74,20 @@ CREATE TABLE IF NOT EXISTS frontier (
     updated_at REAL
 );
 CREATE INDEX IF NOT EXISTS frontier_state ON frontier(state);
+
+-- History of crawl runs, shown in the admin dashboard.
+CREATE TABLE IF NOT EXISTS crawl_runs (
+    id            INTEGER PRIMARY KEY,
+    started_at    REAL,
+    finished_at   REAL,
+    seeds         TEXT,
+    status        TEXT,   -- running | finished | stopped | error | interrupted
+    pages_indexed INTEGER DEFAULT 0,
+    errors        INTEGER DEFAULT 0,
+    max_pages     INTEGER,
+    max_depth     INTEGER,
+    detail        TEXT
+);
 """
 
 
@@ -93,6 +108,9 @@ class Index:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        # Wait rather than erroring if another connection (e.g. a running crawl)
+        # holds the write lock momentarily.
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._ensure_fts5()
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
@@ -270,6 +288,61 @@ class Index:
                 )
             self._conn.commit()
         return len(rows)
+
+    # ------------------------------------------------------------------ #
+    # Crawl-run history (shown in the admin dashboard)
+    # ------------------------------------------------------------------ #
+    def record_crawl_start(
+        self, seeds: list[str], max_pages: int, max_depth: int
+    ) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO crawl_runs "
+                "(started_at, seeds, status, max_pages, max_depth) "
+                "VALUES (?, ?, 'running', ?, ?)",
+                (time.time(), json.dumps(seeds), max_pages, max_depth),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
+
+    def record_crawl_finish(
+        self,
+        run_id: int,
+        status: str,
+        pages_indexed: int,
+        errors: int,
+        detail: str | None = None,
+    ) -> None:
+        self._write(
+            "UPDATE crawl_runs SET finished_at=?, status=?, pages_indexed=?, "
+            "errors=?, detail=? WHERE id=?",
+            (time.time(), status, pages_indexed, errors, detail, run_id),
+        )
+
+    def mark_running_interrupted(self) -> int:
+        """On startup, flag any 'running' rows left over from a crash/restart."""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE crawl_runs SET status='interrupted', finished_at=? "
+                "WHERE status='running'",
+                (time.time(),),
+            )
+            self._conn.commit()
+            return cur.rowcount
+
+    def recent_crawls(self, limit: int = 12) -> list[dict]:
+        rows = self._query(
+            "SELECT * FROM crawl_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["seeds"] = json.loads(d.get("seeds") or "[]")
+            except (TypeError, ValueError):
+                d["seeds"] = []
+            out.append(d)
+        return out
 
     def close(self) -> None:
         with self._lock:

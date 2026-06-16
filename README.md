@@ -198,6 +198,8 @@ you can, without touching the command line:
 - **Watch live status** — indexed / queued / errors / pages-per-second update
   every couple of seconds, with a progress bar and a content-type breakdown.
 - **Add URLs to a running crawl**, or **Stop** it.
+- **Review crawl history** — every run is recorded (seeds, status, pages,
+  errors, duration); a crawl interrupted by a restart is flagged as such.
 
 So you only ever need to launch **one** thing (the web server); the crawling is
 driven from the page. A live status pill in the header shows crawl activity on

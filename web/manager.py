@@ -13,15 +13,18 @@ import time
 
 from crawler.config import Config
 from crawler.crawler import WebCrawler
+from crawler.index import Index
 
 log = logging.getLogger("crawler.manager")
 
 
 class CrawlManager:
-    def __init__(self, base_config: Config) -> None:
+    def __init__(self, base_config: Config, index: Index) -> None:
         self._base = base_config
+        self._index = index
         self._crawler: WebCrawler | None = None
         self._task: asyncio.Task | None = None
+        self._run_id: int | None = None
         self._started_at: float | None = None
         self._last_summary: dict | None = None
         self._last_error: str | None = None
@@ -61,16 +64,34 @@ class CrawlManager:
         self._last_seeds = seeds
         self._last_error = None
         self._last_summary = None
+        self._run_id = await asyncio.to_thread(
+            self._index.record_crawl_start, seeds, cfg.max_pages, cfg.max_depth
+        )
         self._task = asyncio.create_task(self._run())
         log.info("Crawl started from admin with %d seed(s)", len(seeds))
 
     async def _run(self) -> None:
         assert self._crawler is not None
+        status, detail = "finished", None
         try:
             self._last_summary = await self._crawler.run()
+            if self._crawler.stopped_by_user:
+                status = "stopped"
         except Exception as exc:  # surface failures in the dashboard
             self._last_error = repr(exc)
+            status, detail = "error", repr(exc)
             log.exception("Crawl task failed")
+        finally:
+            if self._run_id is not None:
+                st = self._crawler.status()
+                await asyncio.to_thread(
+                    self._index.record_crawl_finish,
+                    self._run_id,
+                    status,
+                    st["pages_indexed"],
+                    st["errors"],
+                    detail,
+                )
 
     def stop(self) -> bool:
         """Signal the running crawl to wind down. Returns False if none running."""
@@ -90,6 +111,15 @@ class CrawlManager:
             return {"added": added, "started": False}
         await self.start(urls, overrides)
         return {"added": len(urls), "started": True}
+
+    def history(self, limit: int = 12) -> list[dict]:
+        rows = self._index.recent_crawls(limit)
+        # Show live counts for the row that is currently running.
+        if self.running and self._crawler and rows and rows[0].get("id") == self._run_id:
+            st = self._crawler.status()
+            rows[0]["pages_indexed"] = st["pages_indexed"]
+            rows[0]["errors"] = st["errors"]
+        return rows
 
     def status(self) -> dict:
         st = {

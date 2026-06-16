@@ -28,6 +28,20 @@
   .types { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; font-size: 14px; }
   .types .t { color: var(--muted); }
   .types .n { font-variant-numeric: tabular-nums; text-align: right; }
+
+  table.hist { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  table.hist th { text-align: left; color: var(--faint); font-weight: 600; text-transform: uppercase;
+    font-size: 11px; letter-spacing: .4px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  table.hist td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.hist tr:last-child td { border-bottom: none; }
+  table.hist .seeds { color: var(--fg); word-break: break-all; }
+  table.hist .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .sb { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-2); }
+  .sb.running { color: #0b1220; background: var(--good); border-color: transparent; }
+  .sb.finished { color: var(--good); border-color: rgba(52,211,153,.4); }
+  .sb.stopped { color: var(--warn); border-color: rgba(251,191,36,.4); }
+  .sb.error, .sb.interrupted { color: var(--bad); border-color: rgba(248,113,113,.4); }
 {% endblock %}
 
 {% block content %}
@@ -71,6 +85,17 @@
       <button class="btn danger" id="btn-stop" onclick="stopCrawl()">■ Stop</button>
     </div>
     <div class="toast" id="action-note"></div>
+  </div>
+
+  <h2>Recent crawls</h2>
+  <div class="card">
+    <table class="hist">
+      <thead><tr>
+        <th>Started</th><th>Seeds</th><th>Status</th>
+        <th class="num">Pages</th><th class="num">Errors</th><th class="num">Duration</th>
+      </tr></thead>
+      <tbody id="history"><tr><td colspan="6" class="muted">No crawls yet.</td></tr></tbody>
+    </table>
   </div>
 
   <h2>Index</h2>
@@ -126,7 +151,39 @@
     } else { note.textContent = ''; }
 
     if (s.stats && s.stats.by_content_type) renderTypes(s.stats.by_content_type);
+    if (s.recent) renderHistory(s.recent);
   };
+
+  function esc(str) {
+    return String(str == null ? '' : str).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function when(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts * 1000);
+    return d.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  }
+  function dur(a, b) {
+    if (!a) return '—';
+    return fmtTime(((b || Date.now()/1000) - a));
+  }
+  function renderHistory(rows) {
+    const body = document.getElementById('history');
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="muted">No crawls yet.</td></tr>'; return; }
+    body.innerHTML = rows.map(r => {
+      const seeds = (r.seeds || []);
+      const seedTxt = seeds.length ? esc(seeds[0]) + (seeds.length > 1 ? ` +${seeds.length-1}` : '') : '—';
+      const st = esc(r.status || '');
+      return `<tr>
+        <td>${when(r.started_at)}</td>
+        <td class="seeds" title="${esc(seeds.join(', '))}">${seedTxt}</td>
+        <td><span class="sb ${st}">${st}</span></td>
+        <td class="num">${r.pages_indexed || 0}</td>
+        <td class="num">${r.errors || 0}</td>
+        <td class="num">${dur(r.started_at, r.finished_at)}</td>
+      </tr>`;
+    }).join('');
+  }
 
   function renderTypes(map) {
     const entries = Object.entries(map).sort((a,b)=>b[1]-a[1]);

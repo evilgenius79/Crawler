@@ -39,17 +39,23 @@ class WebCrawler:
 
         self._renderer: JSRenderer | None = None
         self._start_time: float | None = None
+        self._stopped_by_user = False
 
     # ------------------------------------------------------------------ #
     # Live control surface (used by the web admin dashboard)
     # ------------------------------------------------------------------ #
     def stop(self) -> None:
         """Signal the crawl to wind down; in-flight workers drain the queue."""
+        self._stopped_by_user = True
         self._stop.set()
 
     @property
     def stopping(self) -> bool:
         return self._stop.is_set()
+
+    @property
+    def stopped_by_user(self) -> bool:
+        return self._stopped_by_user
 
     def status(self) -> dict:
         elapsed = (time.time() - self._start_time) if self._start_time else 0.0

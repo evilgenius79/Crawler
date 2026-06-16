@@ -19,11 +19,13 @@ from .manager import CrawlManager
 
 config = Config.load()
 index = Index(config.db_path)
-manager = CrawlManager(config)
+manager = CrawlManager(config, index)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # A crawl row left as 'running' means the server died mid-crawl last time.
+    index.mark_running_interrupted()
     autostart = os.environ.get("CRAWLER_AUTOSTART", "").lower() in ("1", "true", "yes")
     if autostart and config.seeds:
         try:
@@ -180,7 +182,13 @@ def api_stats():
 def api_crawl_status():
     st = manager.status()
     st["stats"] = index.stats()
+    st["recent"] = manager.history()
     return st
+
+
+@app.get("/api/crawl/history")
+def api_crawl_history(limit: int = 25):
+    return {"recent": manager.history(limit)}
 
 
 @app.post("/api/crawl/start")
