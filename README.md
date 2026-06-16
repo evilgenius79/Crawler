@@ -66,6 +66,7 @@ python -m crawler -c config.yaml crawl
 ```
 python -m crawler crawl    [SEEDS...] [--max-pages N] [--max-depth N]
                            [--concurrency N] [--same-domain-only]
+                           [--ignore-robots]
                            [--render-js] [--no-resume] [--allow-private]
 python -m crawler recrawl  [SEEDS...] [--older-than-days N]   # incremental update
 python -m crawler schedule [SEEDS...] [--interval SECONDS] [--older-than-days N]
@@ -132,6 +133,19 @@ Scripts* plugin:
 ```bash
 docker exec personal-search python -m crawler recrawl --older-than-days 1
 ```
+
+### Ignoring robots.txt
+
+robots.txt is a voluntary convention, not a law, so the crawler can skip it:
+
+```bash
+python -m crawler crawl https://example.com --ignore-robots
+```
+
+(Equivalently `respect_robots: false` in the config, or `CRAWLER_RESPECT_ROBOTS=false`.)
+Even with robots disabled, keep `politeness_delay` sane — hammering a server is
+how you get IP-banned (and how a crawl starts to look like an attack). Note that
+many sites' Terms of Service still forbid scraping regardless of robots.txt.
 
 ## Search syntax
 

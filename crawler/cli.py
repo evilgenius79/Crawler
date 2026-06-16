@@ -36,6 +36,11 @@ def _build_parser() -> argparse.ArgumentParser:
             help="Only follow links within the seed domains",
         )
         sp.add_argument(
+            "--ignore-robots",
+            action="store_true",
+            help="Do not fetch or obey robots.txt (be considerate; use politeness-delay)",
+        )
+        sp.add_argument(
             "--render-js",
             action="store_true",
             help="Render pages with a headless browser (needs Playwright)",
@@ -102,6 +107,8 @@ def _load_config(args) -> Config:
             setattr(cfg, attr, val)
     if getattr(args, "same_domain_only", False):
         cfg.same_domain_only = True
+    if getattr(args, "ignore_robots", False):
+        cfg.respect_robots = False
     if getattr(args, "render_js", False):
         cfg.render_js = True
     if getattr(args, "no_resume", False):
