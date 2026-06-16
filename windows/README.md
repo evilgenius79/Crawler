@@ -16,7 +16,7 @@ on unraid). No Docker required — it's just Python.
 | Script | What it does |
 |--------|--------------|
 | `start-search.bat` | Launches the search UI at <http://localhost:8000>. Keep the window open. |
-| `crawl.bat URL ...` | Crawls the given site(s), following links outward to other sites. |
+| `crawl.bat` | Crawls site(s), following links outward. Double-click it and it asks for the URL(s), or pass them: `crawl.bat https://example.com`. |
 | `recrawl.bat` | Re-fetches anything older than a day (used by the scheduled task). |
 
 Examples (from a Command Prompt in this folder, or just double-click):
