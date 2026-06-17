@@ -151,6 +151,14 @@ Either way keep `politeness_delay` sane — hammering a server is how you get
 IP-banned (and how a crawl starts to look like an attack). Note that many sites'
 Terms of Service still forbid scraping regardless of robots.txt.
 
+### User-Agent
+
+Every request sends one `User-Agent` header. The default identifies the crawler
+(`PersonalCrawler/0.1 …`); change it with `--user-agent`, `user_agent:` in the
+config, `CRAWLER_USER_AGENT`, or the per-crawl field in the admin dashboard.
+Pasting a real browser UA can get past simple bot filters — but a JS challenge
+(e.g. Cloudflare) needs `--render-js`, and managed challenges may still block.
+
 ### Watching progress
 
 While crawling, a heartbeat line is printed every few seconds so you can tell it
@@ -198,6 +206,8 @@ you can, without touching the command line:
   **exclude-URL patterns** (skip `/logout`, `?sort=`, calendars, …).
 - **Watch live status** — indexed / queued / errors / pages-per-second update
   every couple of seconds, with a progress bar and a content-type breakdown.
+- **See why pages failed** — a Recent errors panel lists each failure with its
+  reason (e.g. `HTTP 403`, `HTTP 503`, timeouts) and URL.
 - **Add URLs to a running crawl**, or **Stop** it.
 - **Review crawl history** — every run is recorded (seeds, status, pages,
   errors, duration); a crawl interrupted by a restart is flagged as such.

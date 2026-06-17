@@ -362,4 +362,7 @@ def _overrides(payload: dict) -> dict:
             out[key] = _to_bool(payload[key])
     if "exclude_patterns" in payload and payload["exclude_patterns"] is not None:
         out["exclude_patterns"] = _as_url_list(payload["exclude_patterns"])
+    ua = payload.get("user_agent")
+    if isinstance(ua, str) and ua.strip():
+        out["user_agent"] = ua.strip()
     return out

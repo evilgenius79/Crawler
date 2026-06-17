@@ -83,6 +83,13 @@
     <label class="lbl">Exclude URL patterns (one per line — any URL containing these is skipped)</label>
     <textarea class="field" id="exclude_patterns" style="min-height:54px" placeholder="/logout&#10;?sort=&#10;/calendar/"></textarea>
 
+    <label class="lbl">User-Agent (blank = default; paste a browser UA for picky sites)</label>
+    <input class="field" id="user_agent" placeholder="{{ config.user_agent }}">
+    <div class="muted" style="font-size:12px;margin-top:5px">
+      Tip: a real browser UA can get past simple bot filters, but Cloudflare's JS
+      challenge needs “Render JavaScript” on — and managed challenges may still block.
+    </div>
+
     <div class="actions">
       <button class="btn primary" id="btn-start" onclick="startCrawl()">▶ Start crawl</button>
       <button class="btn" id="btn-add" onclick="addUrls()">＋ Add to running crawl</button>
@@ -99,6 +106,14 @@
         <th class="num">Pages</th><th class="num">Errors</th><th class="num">Duration</th>
       </tr></thead>
       <tbody id="history"><tr><td colspan="6" class="muted">No crawls yet.</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Recent errors</h2>
+  <div class="card">
+    <table class="hist">
+      <thead><tr><th>When</th><th>Reason</th><th>URL</th></tr></thead>
+      <tbody id="errors"><tr><td colspan="3" class="muted">No errors.</td></tr></tbody>
     </table>
   </div>
 
@@ -190,9 +205,20 @@
 
     if (s.stats && s.stats.by_content_type) renderTypes(s.stats.by_content_type);
     if (s.recent) renderHistory(s.recent);
+    if (s.recent_errors) renderErrors(s.recent_errors);
     if (s.schedule && !scheduleTouched) renderSchedule(s.schedule);
     document.getElementById('btn-add').disabled = !running;
   };
+
+  function renderErrors(rows) {
+    const body = document.getElementById('errors');
+    if (!rows || !rows.length) { body.innerHTML = '<tr><td colspan="3" class="muted">No errors.</td></tr>'; return; }
+    body.innerHTML = rows.map(e => `<tr>
+        <td>${when(e.when)}</td>
+        <td><span class="sb error">${esc(e.reason)}</span></td>
+        <td class="seeds"><a href="${esc(e.url)}" rel="noopener noreferrer">${esc(e.url)}</a></td>
+      </tr>`).join('');
+  }
 
   // Don't clobber the schedule form once the user starts editing it.
   let scheduleTouched = false;
@@ -262,6 +288,7 @@
       render_js: chk('render_js'),
       deduplicate: chk('deduplicate'),
       exclude_patterns: val('exclude_patterns'),
+      user_agent: val('user_agent'),
     };
   }
 

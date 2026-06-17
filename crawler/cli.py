@@ -60,6 +60,10 @@ def _build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="Permit crawling private/loopback addresses (unsafe)",
         )
+        sp.add_argument(
+            "--user-agent",
+            help="Override the User-Agent header sent on every request",
+        )
 
     crawl = sub.add_parser("crawl", help="Crawl from seed URLs and build the index")
     add_crawl_flags(crawl)
@@ -124,6 +128,8 @@ def _load_config(args) -> Config:
         cfg.block_private_addresses = False
     if getattr(args, "older_than_days", None) is not None:
         cfg.recrawl_after_days = args.older_than_days
+    if getattr(args, "user_agent", None):
+        cfg.user_agent = args.user_agent
     if getattr(args, "seeds", None):
         cfg.seeds = args.seeds
     return cfg

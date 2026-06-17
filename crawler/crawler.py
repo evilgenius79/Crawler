@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from contextlib import AsyncExitStack
 
 from . import security
@@ -30,6 +31,8 @@ class WebCrawler:
         self._pages_done = 0
         self._errors = 0
         self._duplicates = 0
+        # A rolling window of recent failures (url + reason) for the dashboard.
+        self._recent_errors: deque[dict] = deque(maxlen=50)
         self._counter_lock = asyncio.Lock()
 
         # Per-host serialisation + last-access time for politeness.
@@ -68,7 +71,12 @@ class WebCrawler:
             "seen": self.frontier.seen_count,
             "elapsed_seconds": round(elapsed, 1),
             "stopping": self._stop.is_set(),
+            # Most recent failures first.
+            "recent_errors": list(self._recent_errors)[-15:][::-1],
         }
+
+    def _record_error(self, url: str, reason: str) -> None:
+        self._recent_errors.append({"url": url, "reason": reason, "when": time.time()})
 
     async def add_urls(self, urls: list[str], depth: int = 0) -> int:
         """Inject URLs into a running (or about-to-run) crawl's frontier."""
@@ -200,6 +208,7 @@ class WebCrawler:
             return
         if not await self._host_is_safe(url):
             log.debug("Blocked unsafe/private address: %s", url)
+            self._record_error(url, "blocked: unresolved or private/unsafe host")
             await self._persist_state(url, "error")
             return
         if self.config.respect_robots and not await self._robots.allowed(url):
@@ -210,8 +219,10 @@ class WebCrawler:
         await self._politeness_wait(url)
         result = await self._fetch(url)
         if not result.ok:
-            log.debug("Fetch failed (%s): %s", result.status or result.error, url)
+            reason = f"HTTP {result.status}" if result.status else (result.error or "fetch failed")
+            log.debug("Fetch failed (%s): %s", reason, url)
             self._errors += 1
+            self._record_error(url, reason)
             await self._persist_state(url, "error")
             return
 

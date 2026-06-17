@@ -50,6 +50,7 @@ class CrawlManager:
             "recrawl_after_days",
             "deduplicate",
             "exclude_patterns",
+            "user_agent",
         ):
             if overrides.get(key) is not None:
                 setattr(cfg, key, overrides[key])
