@@ -115,6 +115,33 @@ python -m crawler crawl https://spa.example.com --render-js
 If Playwright (or its browsers) isn't installed, the crawler logs a warning and
 falls back to plain HTTP fetching, so nothing breaks.
 
+### Real-browser mode (for a few sites behind bot challenges)
+
+Some sites sit behind a Cloudflare-style "checking your browser" challenge that a
+normal crawler (or even headless rendering) can't pass. **Real-browser mode**
+fetches pages through a *visible, persistent* Chromium instead:
+
+```bash
+pip install playwright && playwright install chromium
+python -m crawler crawl https://slow-site.example --real-browser --max-pages 500
+```
+
+…or just tick **“Real browser (solve challenges)”** in the admin start form.
+
+- It opens a real browser window. When a site shows the challenge, **solve it
+  once** in that window; the crawler waits, then continues and **reuses the
+  clearance** (cookies persist in a saved profile) for the rest of the site and
+  future runs.
+- It's a genuine browser with a real fingerprint and your own cookies — no
+  spoofing — so it presents honestly.
+- Trade-offs: **slow and one page at a time**, it needs a **desktop session**
+  (it works great on your Windows VM; a headless server has no window to show),
+  and a hard *managed* challenge may still re-prompt. Best for a handful of
+  specific sites whose own search is worse than yours will be.
+
+The crawl is otherwise identical — same frontier, link-following, indexing,
+dedup, and scheduling; only the fetching goes through the browser.
+
 ## Running on unraid / Docker
 
 The index lives in a single folder (`/data`), so persistence is just a volume.

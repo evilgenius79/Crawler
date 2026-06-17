@@ -62,7 +62,7 @@ Action → Import Task…** select the file.
 > password), or install it as a Windows service with a tool like
 > [NSSM](https://nssm.cc/).
 
-## Optional: JavaScript rendering
+## Optional: JavaScript rendering & real-browser mode
 
 ```bat
 .venv\Scripts\activate
@@ -70,5 +70,10 @@ pip install playwright
 playwright install chromium
 ```
 
-Then add `--render-js` to a crawl, e.g. `crawl.bat https://some-spa.com` after
-editing the flag into the script.
+- **Render JavaScript** — tick it in the admin form (or `--render-js`) to index
+  JS-built pages.
+- **Real browser (solve challenges)** — tick it in the admin form (or
+  `--real-browser`) for the handful of sites behind a Cloudflare-style check. A
+  real Chromium window opens on this VM's desktop; solve the challenge once and
+  the crawler reuses the clearance. Keep the VM's desktop session open so the
+  window can appear.

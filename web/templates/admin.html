@@ -66,7 +66,13 @@
       <label class="opt"><input type="checkbox" id="same_domain_only"> Stay on seed domains only</label>
       <label class="opt"><input type="checkbox" id="respect_robots"> Respect robots.txt</label>
       <label class="opt"><input type="checkbox" id="render_js"> Render JavaScript</label>
+      <label class="opt"><input type="checkbox" id="real_browser"> Real browser (solve challenges)</label>
       <label class="opt"><input type="checkbox" id="deduplicate" checked> Skip duplicate pages</label>
+    </div>
+    <div class="muted" style="font-size:12px;margin-top:6px">
+      “Real browser” opens a visible Chromium so you can solve a Cloudflare-style
+      check once; it then reuses the clearance. Slow, one page at a time, and the
+      server must have a desktop session. Needs Playwright installed.
     </div>
 
     <div class="row" style="margin-top:14px">
@@ -311,6 +317,7 @@
       same_domain_only: chk('same_domain_only'),
       respect_robots: chk('respect_robots'),
       render_js: chk('render_js'),
+      real_browser: chk('real_browser'),
       deduplicate: chk('deduplicate'),
       exclude_patterns: val('exclude_patterns'),
       user_agent: val('user_agent'),

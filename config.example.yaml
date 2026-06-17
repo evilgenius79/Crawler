@@ -55,3 +55,10 @@ recrawl_after_days: 0
 # JavaScript rendering. Requires Playwright + browsers installed (see README).
 render_js: false
 render_wait_ms: 1500
+
+# Real-browser mode: fetch via a VISIBLE, persistent Chromium so you can solve a
+# bot challenge (e.g. Cloudflare) once and reuse the clearance. Slow; needs a
+# desktop session + Playwright. Meant for a few specific tough sites.
+real_browser: false
+browser_solve_timeout: 180   # seconds to wait for you to solve a challenge
+# browser_profile_dir: ""    # default: <data_dir>/browser-profile

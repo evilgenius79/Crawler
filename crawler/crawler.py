@@ -14,7 +14,7 @@ from .extractors import extract
 from .fetcher import Fetcher
 from .frontier import Frontier
 from .index import Index
-from .render import JSRenderer
+from .render import JSRenderer, RealBrowser
 from .robots import RobotsCache
 from .utils import domain_of, normalize_url, registrable_suffix_match
 
@@ -42,6 +42,7 @@ class WebCrawler:
         self._host_safe: dict[str, bool] = {}
 
         self._renderer: JSRenderer | None = None
+        self._browser: RealBrowser | None = None
         self._start_time: float | None = None
         self._stopped_by_user = False
         # Set by the web manager so errors can be persisted against the run.
@@ -113,22 +114,27 @@ class WebCrawler:
 
         start = time.time()
         self._start_time = start
+        # A real browser does one page at a time (and one challenge window).
+        concurrency = 1 if self.config.real_browser else max(1, self.config.concurrency)
         log.info(
-            "Starting crawl: %d URLs queued, concurrency=%d, robots=%s",
+            "Starting crawl: %d URLs queued, concurrency=%d, robots=%s%s",
             self.frontier.qsize(),
-            self.config.concurrency,
+            concurrency,
             "on" if self.config.respect_robots else "off",
+            ", real-browser" if self.config.real_browser else "",
         )
         async with AsyncExitStack() as stack:
             fetcher = await stack.enter_async_context(Fetcher(self.config))
             self._fetcher = fetcher
             self._robots = RobotsCache(fetcher, self.config.user_agent)
-            if self.config.render_js:
+            if self.config.real_browser:
+                self._browser = await stack.enter_async_context(RealBrowser(self.config))
+            elif self.config.render_js:
                 self._renderer = await stack.enter_async_context(JSRenderer(self.config))
 
             workers = [
                 asyncio.create_task(self._worker(i))
-                for i in range(max(1, self.config.concurrency))
+                for i in range(concurrency)
             ]
             reporter = asyncio.create_task(self._progress_reporter())
             await self.frontier.join()
@@ -276,7 +282,14 @@ class WebCrawler:
                 )
 
     async def _fetch(self, url: str):
-        """Fetch over HTTP, optionally re-rendering HTML in a headless browser."""
+        """Fetch a URL, via the real browser, headless renderer, or plain HTTP."""
+        # Real-browser mode: the browser carries cookies/challenge clearance.
+        if self._browser and self._browser.available:
+            result = await self._browser.fetch(url)
+            if result.error == "non-html":
+                return await self._fetcher.fetch(url)  # PDFs etc. over plain HTTP
+            return result
+
         result = await self._fetcher.fetch(url)
         if (
             self._renderer

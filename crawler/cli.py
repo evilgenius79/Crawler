@@ -51,6 +51,12 @@ def _build_parser() -> argparse.ArgumentParser:
             help="Render pages with a headless browser (needs Playwright)",
         )
         sp.add_argument(
+            "--real-browser",
+            action="store_true",
+            help="Fetch via a visible, persistent browser so you can solve bot "
+            "challenges (needs Playwright + a desktop session; slow)",
+        )
+        sp.add_argument(
             "--no-resume",
             action="store_true",
             help="Ignore the persisted frontier; start fresh",
@@ -122,6 +128,8 @@ def _load_config(args) -> Config:
         cfg.respect_robots = True
     if getattr(args, "render_js", False):
         cfg.render_js = True
+    if getattr(args, "real_browser", False):
+        cfg.real_browser = True
     if getattr(args, "no_resume", False):
         cfg.resume = False
     if getattr(args, "allow_private", False):

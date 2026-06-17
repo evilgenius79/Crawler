@@ -362,7 +362,7 @@ def _overrides(payload: dict) -> dict:
                 out[key] = max(low, caster(payload[key]))
             except (TypeError, ValueError):
                 pass
-    for key in ("same_domain_only", "respect_robots", "render_js", "deduplicate"):
+    for key in ("same_domain_only", "respect_robots", "render_js", "real_browser", "deduplicate"):
         if key in payload and payload[key] is not None:
             out[key] = _to_bool(payload[key])
     if "exclude_patterns" in payload and payload["exclude_patterns"] is not None:

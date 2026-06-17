@@ -46,6 +46,7 @@ class CrawlManager:
             "same_domain_only",
             "respect_robots",
             "render_js",
+            "real_browser",
             "politeness_delay",
             "recrawl_after_days",
             "deduplicate",

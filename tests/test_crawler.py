@@ -157,6 +157,22 @@ def test_parse_query_filetype(monkeypatch):
         assert clean4 == "docs" and domain4 == "example.com"
 
 
+def test_real_browser_ua_and_profile():
+    from crawler.config import Config
+    from crawler.render import RealBrowser
+
+    cfg = Config()
+    cfg.data_dir = "/tmp/whatever"
+    rb = RealBrowser(cfg)
+    # Default bot UA -> use the browser's own genuine UA (None).
+    assert rb._user_agent() is None
+    cfg.user_agent = "Mozilla/5.0 (Custom Browser)"
+    assert rb._user_agent() == "Mozilla/5.0 (Custom Browser)"
+    # Profile dir defaults under the data dir.
+    assert rb._profile_dir().endswith("browser-profile")
+    assert not rb.available  # nothing launched
+
+
 def test_dedup_and_management():
     with tempfile.TemporaryDirectory() as d:
         idx = Index(os.path.join(d, "t.db"))

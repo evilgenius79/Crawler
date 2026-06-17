@@ -52,6 +52,13 @@ class Config:
     render_js: bool = False
     render_wait_ms: int = 1500  # extra settle time after page load
 
+    # Real-browser mode: fetch pages with a VISIBLE, persistent Chromium so you
+    # can solve a bot challenge (e.g. Cloudflare) once and reuse the clearance.
+    # Slow and needs a desktop session; meant for a few tough sites.
+    real_browser: bool = False
+    browser_profile_dir: str = ""        # default: <data_dir>/browser-profile
+    browser_solve_timeout: int = 180     # seconds to wait for you to solve a challenge
+
     # Resumability / re-crawling.
     resume: bool = True  # persist the frontier and resume pending URLs
     recrawl_after_days: float = 0.0  # >0 re-queues docs older than this on crawl
