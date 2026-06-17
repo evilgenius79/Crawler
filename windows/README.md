@@ -64,6 +64,10 @@ Action → Import Task…** select the file.
 
 ## Optional: JavaScript rendering & real-browser mode
 
+These need Playwright + a Chromium browser, which aren't installed by default
+(it's a big download). Just double-click **`install-browser.bat`** once — or do
+it manually:
+
 ```bat
 .venv\Scripts\activate
 pip install playwright

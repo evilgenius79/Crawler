@@ -127,6 +127,9 @@ python -m crawler crawl https://slow-site.example --real-browser --max-pages 500
 ```
 
 …or just tick **“Real browser (solve challenges)”** in the admin start form.
+(On Windows, double-click `windows\install-browser.bat` to do that install once.)
+It's an optional, heavy download, so it is **not** installed by default; without
+it, the crawler simply falls back to plain HTTP.
 
 - It opens a real browser window. When a site shows the challenge, **solve it
   once** in that window; the crawler waits, then continues and **reuses the
