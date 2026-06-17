@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Stats — PersonalSearch{% endblock %}
+{% block nav_stats %}active{% endblock %}
+
+{% block style %}
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin: 26px 2px 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .stat { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+  .stat .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .stat .v { font-size: 26px; font-weight: 750; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .rows { display: flex; flex-direction: column; gap: 8px; }
+  .rowbar { display: grid; grid-template-columns: 200px 1fr 60px; align-items: center; gap: 10px; font-size: 13.5px; }
+  .rowbar .lab { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rowbar .track { background: var(--surface); border-radius: 999px; height: 10px; overflow: hidden; }
+  .rowbar .track > span { display: block; height: 100%;
+    background: linear-gradient(90deg, var(--accent), #22d3ee); }
+  .rowbar .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .rowbar a.lab:hover { color: var(--fg); }
+{% endblock %}
+
+{% block content %}
+  <h2>Overview</h2>
+  <div class="grid">
+    <div class="stat"><div class="k">Documents</div><div class="v">{{ stats.total_documents }}</div></div>
+    <div class="stat"><div class="k">Total size</div><div class="v">{{ (stats.total_bytes / 1048576) | round(1) }} MB</div></div>
+    <div class="stat"><div class="k">Domains</div><div class="v">{{ domains | length }}{{ '+' if domains|length >= 25 }}</div></div>
+    <div class="stat"><div class="k">Content types</div><div class="v">{{ stats.by_content_type | length }}</div></div>
+  </div>
+
+  <h2>Top domains</h2>
+  <div class="card rows">
+    {% set dmax = (domains[0].count if domains else 1) %}
+    {% for d in domains %}
+      <div class="rowbar">
+        <a class="lab" href="/?q={{ ('site:' ~ d.domain) | urlencode }}" title="Browse {{ d.domain }}">{{ d.domain }}</a>
+        <div class="track"><span style="width: {{ (100 * d.count / dmax) | round }}%"></span></div>
+        <div class="num">{{ d.count }}</div>
+      </div>
+    {% else %}
+      <div class="muted">Nothing indexed yet.</div>
+    {% endfor %}
+  </div>
+
+  <h2>By content type</h2>
+  <div class="card rows">
+    {% set cmax = namespace(v=1) %}
+    {% for t, n in stats.by_content_type.items() %}{% if n > cmax.v %}{% set cmax.v = n %}{% endif %}{% endfor %}
+    {% for t, n in stats.by_content_type.items() %}
+      <div class="rowbar">
+        <span class="lab" title="{{ t }}">{{ t or 'unknown' }}</span>
+        <div class="track"><span style="width: {{ (100 * n / cmax.v) | round }}%"></span></div>
+        <div class="num">{{ n }}</div>
+      </div>
+    {% else %}
+      <div class="muted">Nothing indexed yet.</div>
+    {% endfor %}
+  </div>
+{% endblock %}

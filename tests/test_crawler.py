@@ -143,14 +143,49 @@ def test_parse_query_filetype(monkeypatch):
         import web.app as app
 
         importlib.reload(app)
-        clean, ftype, like = app._parse_query("invoice type:pdf", "")
+        clean, ftype, like, domain = app._parse_query("invoice type:pdf", "")
         assert clean == "invoice" and ftype == "pdf" and like == "application/pdf%"
+        assert domain is None
         # A dropdown/chip selection works too.
-        _, ftype2, like2 = app._parse_query("cat", "image")
+        _, ftype2, like2, _ = app._parse_query("cat", "image")
         assert ftype2 == "image" and like2 == "image/%"
         # Unknown type token is left in the query, not treated as a filter.
-        clean3, ftype3, like3 = app._parse_query("type:bogus hello", "")
+        clean3, ftype3, like3, _ = app._parse_query("type:bogus hello", "")
         assert "type:bogus" in clean3 and ftype3 == "" and like3 is None
+        # site: filter is extracted into a domain.
+        clean4, _, _, domain4 = app._parse_query("docs site:example.com", "")
+        assert clean4 == "docs" and domain4 == "example.com"
+
+
+def test_dedup_and_management():
+    with tempfile.TemporaryDirectory() as d:
+        idx = Index(os.path.join(d, "t.db"))
+        assert idx.upsert("http://a/1", "T", "same body", "text/html", 0, 1, True) is True
+        # Same text under a different URL is skipped as a duplicate.
+        assert idx.upsert("http://b/2", "T", "same body", "text/html", 0, 1, True) is False
+        # ...but allowed when dedup is off.
+        assert idx.upsert("http://b/2", "T", "same body", "text/html", 0, 1, False) is True
+        assert idx.stats()["total_documents"] == 2
+        assert idx.stats()["total_bytes"] == 2
+
+        # Management: delete by domain, delete by url, clear.
+        idx.upsert("https://sub.x.com/p", "X", "hello world", "text/html", 0, 5, False)
+        idx.upsert("https://x.com/q", "X", "hello there", "text/html", 0, 5, False)
+        assert idx.delete_by_domain("x.com") == 2  # subdomain included
+        idx.upsert("http://only/1", "O", "unique text", "text/html", 0, 1, False)
+        assert idx.delete_url("http://only/1") == 1
+        assert idx.clear_index() == 2  # the two http://a/1 and http://b/2 remain
+        assert idx.stats()["total_documents"] == 0
+        idx.close()
+
+
+def test_settings_roundtrip():
+    with tempfile.TemporaryDirectory() as d:
+        idx = Index(os.path.join(d, "t.db"))
+        assert idx.get_setting("missing", {"x": 1}) == {"x": 1}
+        idx.set_setting("schedule", {"enabled": True, "interval_hours": 6})
+        assert idx.get_setting("schedule")["interval_hours"] == 6
+        idx.close()
 
 
 def test_crawl_history():

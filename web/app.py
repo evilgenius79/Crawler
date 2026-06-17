@@ -4,22 +4,47 @@ from __future__ import annotations
 
 import math
 import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Body, FastAPI, Query, Request
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
 from crawler.config import Config
 from crawler.index import HL_CLOSE, HL_OPEN, Index
+from crawler.utils import domain_of
 
 from .manager import CrawlManager
+from .scheduler import Scheduler
 
 config = Config.load()
 index = Index(config.db_path)
 manager = CrawlManager(config, index)
+scheduler = Scheduler(manager, index)
+
+# Optional admin password. When unset, the admin controls are open (handy for a
+# trusted LAN); set CRAWLER_ADMIN_PASSWORD to lock down crawl/index controls.
+ADMIN_PASSWORD = os.environ.get("CRAWLER_ADMIN_PASSWORD", "")
+_basic = HTTPBasic(auto_error=False)
+
+
+def require_admin(credentials: HTTPBasicCredentials | None = Depends(_basic)) -> None:
+    if not ADMIN_PASSWORD:
+        return
+    # Compare as bytes — compare_digest raises on non-ASCII str operands.
+    ok = credentials is not None and secrets.compare_digest(
+        credentials.password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": 'Basic realm="PersonalSearch admin"'},
+        )
 
 
 @asynccontextmanager
@@ -32,6 +57,7 @@ async def lifespan(app: FastAPI):
             await manager.start(config.seeds, {})
         except Exception:  # pragma: no cover - best effort
             pass
+    scheduler.start()
     yield
 
 
@@ -52,7 +78,6 @@ FILETYPE_FILTERS: dict[str, str] = {
     "archive": "application/%zip%",
 }
 
-# The chips shown on the search page, in order.
 FILETYPE_CHIPS = [
     ("", "All"),
     ("web", "Web pages"),
@@ -66,38 +91,46 @@ FILETYPE_CHIPS = [
 
 
 def _escaped_snippet_html(raw: str) -> str:
-    """Escape crawled page text, then turn the index sentinels into <mark> tags.
-
-    Escaping first neutralises any markup in the crawled text; the sentinels are
-    ordinary private-use codepoints that survive escaping, so only our own
-    trusted highlight tags remain. Safe to render as HTML (no XSS).
-    """
+    """Escape crawled page text, then turn the index sentinels into <mark> tags."""
     escaped = str(escape(raw or ""))
     return escaped.replace(HL_OPEN, "<mark>").replace(HL_CLOSE, "</mark>")
 
 
 def safe_snippet(raw: str) -> Markup:
-    """HTML-safe snippet for the server-rendered results page."""
     return Markup(_escaped_snippet_html(raw))
 
 
+def _fmt_ts(ts) -> str:
+    import datetime
+
+    try:
+        return datetime.datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
 templates.env.filters["highlight"] = safe_snippet
+templates.env.filters["domain"] = domain_of
+templates.env.filters["ts"] = _fmt_ts
 
 
-def _parse_query(q: str, ftype: str) -> tuple[str, str, str | None]:
-    """Pull an inline `type:pdf` token out of the query and resolve the filter.
+def _parse_query(q: str, ftype: str) -> tuple[str, str, str | None, str | None]:
+    """Pull inline `type:` and `site:` tokens out of the query.
 
-    Returns (clean_query, effective_type, like_pattern).
+    Returns (clean_query, effective_type, like_pattern, domain).
     """
     terms = []
+    domain = None
     for tok in q.split():
         low = tok.lower()
         if low.startswith("type:") and low[5:] in FILETYPE_FILTERS:
             ftype = low[5:]
+        elif low.startswith("site:") and len(low) > 5:
+            domain = low[5:].strip("/")
         else:
             terms.append(tok)
     like = FILETYPE_FILTERS.get(ftype)
-    return " ".join(terms), ftype, like
+    return " ".join(terms), ftype, like, domain
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -105,67 +138,81 @@ def home(
     request: Request,
     q: str = "",
     type: str = "",
+    sort: str = "relevance",
     page: int = Query(1, ge=1),
 ):
-    clean_q, ftype, like = _parse_query(q, type)
-    hits = []
-    total = 0
+    clean_q, ftype, like, domain = _parse_query(q, type)
+    offset = (page - 1) * PAGE_SIZE
+    hits, total = [], 0
     if clean_q.strip():
-        offset = (page - 1) * PAGE_SIZE
-        hits = index.search(clean_q, limit=PAGE_SIZE, offset=offset, content_type_like=like)
-        total = index.count_matches(clean_q, content_type_like=like)
+        hits = index.search(
+            clean_q, limit=PAGE_SIZE, offset=offset,
+            content_type_like=like, domain=domain, sort=sort,
+        )
+        total = index.count_matches(clean_q, content_type_like=like, domain=domain)
+    elif domain:
+        # Browse a whole domain (e.g. site:example.com with no search terms).
+        hits = index.list_by_domain(domain, limit=PAGE_SIZE, offset=offset, sort=sort)
+        total = index.count_by_domain(domain)
     total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total else 1
     return templates.TemplateResponse(
         request,
         "search.html",
         {
-            "q": q,
-            "ftype": ftype,
-            "chips": FILETYPE_CHIPS,
-            "hits": hits,
-            "total": total,
-            "page": page,
-            "total_pages": total_pages,
-            "stats": index.stats(),
-            "running": manager.running,
+            "q": q, "ftype": ftype, "sort": sort, "chips": FILETYPE_CHIPS,
+            "hits": hits, "total": total, "page": page, "total_pages": total_pages,
+            "stats": index.stats(), "running": manager.running,
         },
     )
 
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin(request: Request):
+@app.get("/cached", response_class=HTMLResponse)
+def cached(request: Request, url: str):
+    doc = index.get_document(url)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not in the index")
+    return templates.TemplateResponse(request, "cached.html", {"doc": doc})
+
+
+@app.get("/stats", response_class=HTMLResponse)
+def stats_page(request: Request):
     return templates.TemplateResponse(
         request,
-        "admin.html",
-        {"stats": index.stats(), "config": config},
+        "stats.html",
+        {"stats": index.stats(), "domains": index.top_domains(25)},
+    )
+
+
+@app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(require_admin)])
+def admin(request: Request):
+    return templates.TemplateResponse(
+        request, "admin.html", {"stats": index.stats(), "config": config}
     )
 
 
 # ----------------------------- JSON API ---------------------------------- #
 @app.get("/api/search")
-def api_search(q: str = "", type: str = "", page: int = Query(1, ge=1)):
-    clean_q, ftype, like = _parse_query(q, type)
+def api_search(q: str = "", type: str = "", sort: str = "relevance", page: int = Query(1, ge=1)):
+    clean_q, ftype, like, domain = _parse_query(q, type)
     offset = (page - 1) * PAGE_SIZE
-    hits = (
-        index.search(clean_q, limit=PAGE_SIZE, offset=offset, content_type_like=like)
-        if clean_q.strip()
-        else []
-    )
+    if clean_q.strip():
+        hits = index.search(clean_q, limit=PAGE_SIZE, offset=offset,
+                            content_type_like=like, domain=domain, sort=sort)
+        total = index.count_matches(clean_q, content_type_like=like, domain=domain)
+    elif domain:
+        hits = index.list_by_domain(domain, limit=PAGE_SIZE, offset=offset, sort=sort)
+        total = index.count_by_domain(domain)
+    else:
+        hits, total = [], 0
     return JSONResponse(
         {
-            "query": q,
-            "type": ftype,
-            "page": page,
-            "total": index.count_matches(clean_q, content_type_like=like) if clean_q.strip() else 0,
+            "query": q, "type": ftype, "page": page,
+            "total": total,
             "results": [
                 {
-                    "url": h.url,
-                    "title": h.title,
-                    "content_type": h.content_type,
-                    # Page text is escaped and only our <mark> highlights are HTML,
-                    # so this is safe for a consumer to drop into innerHTML.
-                    "snippet": _escaped_snippet_html(h.snippet),
-                    "score": h.score,
+                    "url": h.url, "title": h.title, "content_type": h.content_type,
+                    "crawled_at": h.crawled_at,
+                    "snippet": _escaped_snippet_html(h.snippet), "score": h.score,
                 }
                 for h in hits
             ],
@@ -175,7 +222,7 @@ def api_search(q: str = "", type: str = "", page: int = Query(1, ge=1)):
 
 @app.get("/api/stats")
 def api_stats():
-    return index.stats()
+    return {**index.stats(), "top_domains": index.top_domains(25)}
 
 
 @app.get("/api/crawl/status")
@@ -183,6 +230,7 @@ def api_crawl_status():
     st = manager.status()
     st["stats"] = index.stats()
     st["recent"] = manager.history()
+    st["schedule"] = scheduler.status()
     return st
 
 
@@ -191,32 +239,85 @@ def api_crawl_history(limit: int = 25):
     return {"recent": manager.history(limit)}
 
 
-@app.post("/api/crawl/start")
+@app.post("/api/crawl/start", dependencies=[Depends(require_admin)])
 async def api_crawl_start(payload: dict = Body(default={})):
     seeds = _as_url_list(payload.get("seeds") or payload.get("urls"))
-    overrides = _overrides(payload)
     try:
-        await manager.start(seeds, overrides)
+        await manager.start(seeds, _overrides(payload))
     except (RuntimeError, ValueError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     return {"ok": True, "status": manager.status()}
 
 
-@app.post("/api/crawl/add")
+@app.post("/api/crawl/add", dependencies=[Depends(require_admin)])
 async def api_crawl_add(payload: dict = Body(default={})):
     urls = _as_url_list(payload.get("urls") or payload.get("seeds"))
-    overrides = _overrides(payload)
     try:
-        result = await manager.add_urls(urls, overrides)
+        result = await manager.add_urls(urls, _overrides(payload))
     except (RuntimeError, ValueError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     return {"ok": True, "result": result, "status": manager.status()}
 
 
-@app.post("/api/crawl/stop")
+@app.post("/api/crawl/stop", dependencies=[Depends(require_admin)])
 def api_crawl_stop():
-    stopped = manager.stop()
-    return {"ok": True, "stopping": stopped, "status": manager.status()}
+    return {"ok": True, "stopping": manager.stop(), "status": manager.status()}
+
+
+# ----------------------------- scheduler --------------------------------- #
+@app.get("/api/schedule")
+def api_schedule_get():
+    return scheduler.status()
+
+
+@app.post("/api/schedule", dependencies=[Depends(require_admin)])
+async def api_schedule_set(payload: dict = Body(default={})):
+    changes: dict = {}
+    if "enabled" in payload:
+        changes["enabled"] = _to_bool(payload["enabled"])
+    for key in ("interval_hours", "older_than_days"):
+        if payload.get(key) not in (None, ""):
+            try:
+                changes[key] = float(payload[key])
+            except (TypeError, ValueError):
+                pass
+    if "seeds" in payload:
+        changes["seeds"] = _as_url_list(payload["seeds"])
+    return {"ok": True, "schedule": await scheduler.apply(changes)}
+
+
+# -------------------------- index management ----------------------------- #
+@app.post("/api/index/clear", dependencies=[Depends(require_admin)])
+def api_index_clear():
+    if manager.running:
+        return JSONResponse(
+            {"ok": False, "error": "Stop the running crawl first."}, status_code=400
+        )
+    return {"ok": True, "deleted": index.clear_index()}
+
+
+@app.post("/api/index/delete-domain", dependencies=[Depends(require_admin)])
+def api_index_delete_domain(payload: dict = Body(default={})):
+    if manager.running:
+        return JSONResponse(
+            {"ok": False, "error": "Stop the running crawl first."}, status_code=400
+        )
+    domain = str(payload.get("domain", "")).strip().lower()
+    if not domain:
+        return JSONResponse({"ok": False, "error": "No domain given."}, status_code=400)
+    return {"ok": True, "deleted": index.delete_by_domain(domain)}
+
+
+@app.post("/api/index/delete-url", dependencies=[Depends(require_admin)])
+def api_index_delete_url(payload: dict = Body(default={})):
+    if manager.running:
+        return JSONResponse(
+            {"ok": False, "error": "Stop the running crawl first."}, status_code=400
+        )
+    url = str(payload.get("url", "")).strip()
+    if not url:
+        return JSONResponse({"ok": False, "error": "No URL given."}, status_code=400)
+    return {"ok": True, "deleted": index.delete_url(url)}
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -229,7 +330,6 @@ def _as_url_list(value) -> list[str]:
     if value is None:
         return []
     if isinstance(value, str):
-        # Accept newline- or comma-separated text from a textarea.
         return [p.strip() for p in value.replace(",", "\n").splitlines() if p.strip()]
     if isinstance(value, list):
         return [str(v).strip() for v in value if str(v).strip()]
@@ -244,8 +344,7 @@ def _to_bool(value) -> bool:
 
 def _overrides(payload: dict) -> dict:
     out: dict = {}
-    # (caster, minimum) — clamp so a bad value can't wedge a crawl
-    # (e.g. concurrency 0 would spawn no workers and hang forever).
+    # (caster, minimum) — clamp so a bad value can't wedge a crawl.
     numeric = {
         "max_pages": (int, 1),
         "max_depth": (int, 0),
@@ -258,7 +357,9 @@ def _overrides(payload: dict) -> dict:
                 out[key] = max(low, caster(payload[key]))
             except (TypeError, ValueError):
                 pass
-    for key in ("same_domain_only", "respect_robots", "render_js"):
+    for key in ("same_domain_only", "respect_robots", "render_js", "deduplicate"):
         if key in payload and payload[key] is not None:
             out[key] = _to_bool(payload[key])
+    if "exclude_patterns" in payload and payload["exclude_patterns"] is not None:
+        out["exclude_patterns"] = _as_url_list(payload["exclude_patterns"])
     return out

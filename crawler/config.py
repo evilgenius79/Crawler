@@ -68,6 +68,12 @@ class Config:
     allowed_domains: list[str] = field(default_factory=list)  # empty => any
     blocked_domains: list[str] = field(default_factory=list)
 
+    # Skip any URL containing one of these substrings (e.g. "/logout", "?sort=").
+    exclude_patterns: list[str] = field(default_factory=list)
+
+    # Skip indexing a page whose exact text already exists under another URL.
+    deduplicate: bool = True
+
     # What to keep.
     index_all_types: bool = True  # store metadata even for binaries
     textual_content_types: list[str] = field(

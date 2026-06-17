@@ -29,6 +29,7 @@ class WebCrawler:
         self._stop = asyncio.Event()
         self._pages_done = 0
         self._errors = 0
+        self._duplicates = 0
         self._counter_lock = asyncio.Lock()
 
         # Per-host serialisation + last-access time for politeness.
@@ -62,6 +63,7 @@ class WebCrawler:
         return {
             "pages_indexed": self._pages_done,
             "errors": self._errors,
+            "duplicates": self._duplicates,
             "queued": self.frontier.qsize(),
             "seen": self.frontier.seen_count,
             "elapsed_seconds": round(elapsed, 1),
@@ -223,7 +225,7 @@ class WebCrawler:
         )
 
         if is_textual or self.config.index_all_types:
-            await asyncio.to_thread(
+            stored = await asyncio.to_thread(
                 self.index.upsert,
                 final_url,
                 doc.title,
@@ -231,13 +233,17 @@ class WebCrawler:
                 doc.content_type or result.content_type,
                 depth,
                 len(result.body),
+                self.config.deduplicate,
             )
-            async with self._counter_lock:
-                self._pages_done += 1
-                done = self._pages_done
-            # Per-second progress is emitted by _progress_reporter.
-            if done >= self.config.max_pages:
-                self._stop.set()
+            if stored:
+                async with self._counter_lock:
+                    self._pages_done += 1
+                    done = self._pages_done
+                # Per-second progress is emitted by _progress_reporter.
+                if done >= self.config.max_pages:
+                    self._stop.set()
+            else:
+                self._duplicates += 1
 
         await self._persist_state(url, "done")
 
@@ -275,6 +281,8 @@ class WebCrawler:
     def _in_scope(self, url: str) -> bool:
         host = domain_of(url)
         if not host:
+            return False
+        if any(pat and pat in url for pat in self.config.exclude_patterns):
             return False
         if any(registrable_suffix_match(host, b) for b in self.config.blocked_domains):
             return False

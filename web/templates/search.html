@@ -18,12 +18,20 @@
   .chip:hover { color: var(--fg); border-color: var(--border-2); text-decoration: none; }
   .chip.active { color: #fff; background: linear-gradient(135deg, var(--accent), #4f46e5); border-color: transparent; }
 
-  .meta { color: var(--muted); font-size: 13px; margin: 18px 2px 14px; }
+  .meta { color: var(--muted); font-size: 13px; margin: 18px 2px 14px;
+    display: flex; align-items: center; gap: 12px; }
+  .meta .sort { margin-left: auto; }
+  .meta select { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 8px; font-size: 13px; }
   .result { padding: 14px 0; border-bottom: 1px solid var(--border); }
   .result:last-child { border-bottom: none; }
+  .result .urlrow { display: flex; align-items: center; gap: 8px; }
+  .result .fav { width: 16px; height: 16px; border-radius: 3px; flex: none; background: var(--surface); }
   .result .url { color: var(--url); font-size: 12.5px; word-break: break-all; opacity: .9; }
   .result .title { font-size: 18.5px; font-weight: 650; margin: 3px 0 5px; }
   .result .snippet { color: var(--muted); font-size: 14px; }
+  .result .tools { margin-top: 4px; font-size: 12px; }
+  .result .tools a { color: var(--faint); }
   .badge { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
     color: var(--accent-2); background: rgba(99,102,241,.14); border: 1px solid rgba(99,102,241,.3);
     border-radius: 6px; padding: 1px 7px; margin-left: 8px; vertical-align: middle; }
@@ -43,38 +51,53 @@
 
   <form action="/" method="get" class="searchbar" role="search">
     <input class="field" type="search" name="q" value="{{ q|e }}"
-           placeholder="Search the index…   (tip: add type:pdf)"
+           placeholder="Search the index…   (tips: type:pdf  ·  site:example.com)"
            autocomplete="off" autofocus />
     <input type="hidden" name="type" value="{{ ftype|e }}" />
+    <input type="hidden" name="sort" value="{{ sort|e }}" />
     <button class="btn primary" type="submit">Search</button>
   </form>
 
   <div class="chips">
     {% for value, label in chips %}
       <a class="chip {% if value == ftype %}active{% endif %}"
-         href="/?q={{ q|urlencode }}&type={{ value }}">{{ label }}</a>
+         href="/?q={{ q|urlencode }}&type={{ value }}&sort={{ sort }}">{{ label }}</a>
     {% endfor %}
   </div>
 
   {% if q %}
     {% if hits %}
-      <div class="meta">{{ total }} result{{ '' if total == 1 else 's' }}
-        {% if ftype %}in <b>{{ ftype }}</b>{% endif %} · page {{ page }} of {{ total_pages }}</div>
+      <div class="meta">
+        <span>{{ total }} result{{ '' if total == 1 else 's' }}
+          {% if ftype %}in <b>{{ ftype }}</b>{% endif %} · page {{ page }} of {{ total_pages }}</span>
+        <span class="sort">sort
+          <select onchange="location.href='/?q={{ q|urlencode }}&type={{ ftype }}&sort='+this.value">
+            <option value="relevance" {{ 'selected' if sort != 'date' }}>relevance</option>
+            <option value="date" {{ 'selected' if sort == 'date' }}>newest</option>
+          </select>
+        </span>
+      </div>
       {% for hit in hits %}
         <div class="result">
-          <div class="url">{{ hit.url }}</div>
+          <div class="urlrow">
+            <img class="fav" loading="lazy" alt=""
+                 src="https://icons.duckduckgo.com/ip3/{{ hit.url|domain }}.ico"
+                 onerror="this.style.visibility='hidden'">
+            <span class="url">{{ hit.url }}</span>
+          </div>
           <div class="title">
             <a href="{{ hit.url }}" rel="noopener noreferrer">{{ hit.title }}</a>
             {% if hit.content_type and hit.content_type != 'text/html' %}
               <span class="badge">{{ hit.content_type.split('/')[-1][:18] }}</span>{% endif %}
           </div>
           <div class="snippet">{{ hit.snippet|highlight }}</div>
+          <div class="tools"><a href="/cached?url={{ hit.url|urlencode }}">cached</a></div>
         </div>
       {% endfor %}
 
       <div class="pager">
-        {% if page > 1 %}<a href="/?q={{ q|urlencode }}&type={{ ftype }}&page={{ page-1 }}">← Prev</a>{% endif %}
-        {% if page < total_pages %}<a href="/?q={{ q|urlencode }}&type={{ ftype }}&page={{ page+1 }}">Next →</a>{% endif %}
+        {% if page > 1 %}<a href="/?q={{ q|urlencode }}&type={{ ftype }}&sort={{ sort }}&page={{ page-1 }}">← Prev</a>{% endif %}
+        {% if page < total_pages %}<a href="/?q={{ q|urlencode }}&type={{ ftype }}&sort={{ sort }}&page={{ page+1 }}">Next →</a>{% endif %}
       </div>
     {% else %}
       <div class="empty">No results for <b>{{ q|e }}</b>{% if ftype %} in <b>{{ ftype }}</b>{% endif %}.</div>

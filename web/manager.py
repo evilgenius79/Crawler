@@ -47,6 +47,9 @@ class CrawlManager:
             "respect_robots",
             "render_js",
             "politeness_delay",
+            "recrawl_after_days",
+            "deduplicate",
+            "exclude_patterns",
         ):
             if overrides.get(key) is not None:
                 setattr(cfg, key, overrides[key])
@@ -55,10 +58,12 @@ class CrawlManager:
     async def start(self, seeds: list[str], overrides: dict | None = None) -> None:
         if self.running:
             raise RuntimeError("A crawl is already running")
+        overrides = overrides or {}
         seeds = [s.strip() for s in seeds if s and s.strip()]
-        if not seeds:
+        recrawl = overrides.get("recrawl_after_days") or 0
+        if not seeds and recrawl <= 0:
             raise ValueError("Provide at least one URL to crawl")
-        cfg = self._build_config(seeds, overrides or {})
+        cfg = self._build_config(seeds, overrides)
         self._crawler = WebCrawler(cfg)
         self._started_at = time.time()
         self._last_seeds = seeds
@@ -69,6 +74,15 @@ class CrawlManager:
         )
         self._task = asyncio.create_task(self._run())
         log.info("Crawl started from admin with %d seed(s)", len(seeds))
+
+    async def start_recrawl(self, older_than_days: float, seeds: list[str] | None = None) -> None:
+        """Re-crawl documents older than N days (used by the scheduler).
+
+        ``older_than_days <= 0`` means "refresh everything"; we use a tiny
+        positive window so the >0 re-crawl machinery still engages.
+        """
+        window = older_than_days if older_than_days > 0 else 1e-9
+        await self.start(seeds or [], {"recrawl_after_days": window})
 
     async def _run(self) -> None:
         assert self._crawler is not None

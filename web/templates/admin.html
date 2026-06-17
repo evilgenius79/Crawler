@@ -66,6 +66,7 @@
       <label class="opt"><input type="checkbox" id="same_domain_only"> Stay on seed domains only</label>
       <label class="opt"><input type="checkbox" id="respect_robots"> Respect robots.txt</label>
       <label class="opt"><input type="checkbox" id="render_js"> Render JavaScript</label>
+      <label class="opt"><input type="checkbox" id="deduplicate" checked> Skip duplicate pages</label>
     </div>
 
     <div class="row" style="margin-top:14px">
@@ -78,6 +79,9 @@
         </div>
       </div>
     </div>
+
+    <label class="lbl">Exclude URL patterns (one per line — any URL containing these is skipped)</label>
+    <textarea class="field" id="exclude_patterns" style="min-height:54px" placeholder="/logout&#10;?sort=&#10;/calendar/"></textarea>
 
     <div class="actions">
       <button class="btn primary" id="btn-start" onclick="startCrawl()">▶ Start crawl</button>
@@ -98,6 +102,30 @@
     </table>
   </div>
 
+  <h2>Schedule</h2>
+  <div class="card">
+    <div class="opts" style="margin:0 0 6px">
+      <label class="opt"><input type="checkbox" id="sched_enabled"> Enable automatic re-crawls</label>
+    </div>
+    <div class="row">
+      <div>
+        <label class="lbl">Every (hours)</label>
+        <input class="field" id="sched_interval" type="number" min="0.1" step="0.5" placeholder="24">
+      </div>
+      <div>
+        <label class="lbl">Re-crawl pages older than (days)</label>
+        <input class="field" id="sched_older" type="number" min="0" step="0.5" placeholder="1">
+      </div>
+    </div>
+    <label class="lbl">Extra seed URLs to also crawl each run (optional)</label>
+    <textarea class="field" id="sched_seeds" style="min-height:54px" placeholder="https://example.com"></textarea>
+    <div class="actions">
+      <button class="btn primary" onclick="saveSchedule()">Save schedule</button>
+      <span class="muted" id="sched-state" style="align-self:center"></span>
+    </div>
+    <div class="toast" id="sched-note"></div>
+  </div>
+
   <h2>Index</h2>
   <div class="card">
     <div class="types" id="type-breakdown">
@@ -106,6 +134,16 @@
       {% endfor %}
       {% if not stats.by_content_type %}<div class="muted">Nothing indexed yet — start a crawl above.</div>{% endif %}
     </div>
+
+    <label class="lbl" style="margin-top:18px">Remove a domain or a single URL from the index</label>
+    <div class="nums">
+      <input class="field" id="del_target" placeholder="example.com  or  https://example.com/page">
+      <button class="btn" onclick="deleteTarget()">Delete</button>
+    </div>
+    <div class="actions">
+      <button class="btn danger" onclick="clearIndex()">⚠ Clear entire index</button>
+    </div>
+    <div class="toast" id="index-note"></div>
   </div>
 {% endblock %}
 
@@ -152,7 +190,24 @@
 
     if (s.stats && s.stats.by_content_type) renderTypes(s.stats.by_content_type);
     if (s.recent) renderHistory(s.recent);
+    if (s.schedule && !scheduleTouched) renderSchedule(s.schedule);
+    document.getElementById('btn-add').disabled = !running;
   };
+
+  // Don't clobber the schedule form once the user starts editing it.
+  let scheduleTouched = false;
+  ['sched_enabled','sched_interval','sched_older','sched_seeds'].forEach(id =>
+    document.getElementById(id).addEventListener('input', () => scheduleTouched = true));
+
+  function renderSchedule(sc) {
+    document.getElementById('sched_enabled').checked = !!sc.enabled;
+    if (document.getElementById('sched_interval').value === '') document.getElementById('sched_interval').value = sc.interval_hours;
+    if (document.getElementById('sched_older').value === '') document.getElementById('sched_older').value = sc.older_than_days;
+    if ((sc.seeds||[]).length && document.getElementById('sched_seeds').value === '')
+      document.getElementById('sched_seeds').value = (sc.seeds||[]).join('\n');
+    const state = document.getElementById('sched-state');
+    state.textContent = sc.enabled ? (sc.active ? 'active — every ' + sc.interval_hours + 'h' : 'enabled') : 'off';
+  }
 
   function esc(str) {
     return String(str == null ? '' : str).replace(/[&<>"']/g, c =>
@@ -192,33 +247,66 @@
     el.innerHTML = entries.map(([t,n]) => `<div class="t">${t||'unknown'}</div><div class="n">${n}</div>`).join('');
   }
 
+  const num = id => { const v = document.getElementById(id).value; return v === '' ? null : Number(v); };
+  const val = id => document.getElementById(id).value;
+  const chk = id => document.getElementById(id).checked;
+
   function payload() {
-    const num = id => { const v = document.getElementById(id).value; return v === '' ? null : Number(v); };
     return {
-      urls: document.getElementById('urls').value,
+      urls: val('urls'),
       max_pages: num('max_pages'),
       max_depth: num('max_depth'),
       concurrency: num('concurrency'),
-      same_domain_only: document.getElementById('same_domain_only').checked,
-      respect_robots: document.getElementById('respect_robots').checked,
-      render_js: document.getElementById('render_js').checked,
+      same_domain_only: chk('same_domain_only'),
+      respect_robots: chk('respect_robots'),
+      render_js: chk('render_js'),
+      deduplicate: chk('deduplicate'),
+      exclude_patterns: val('exclude_patterns'),
     };
   }
 
-  async function post(url, body) {
-    const note = document.getElementById('action-note');
+  // Post and report into a given note element.
+  async function postNote(url, body, noteId) {
+    const note = document.getElementById(noteId);
     note.className = 'toast'; note.textContent = 'Working…';
     try {
       const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-      const data = await r.json();
-      if (!r.ok || data.ok === false) { note.className='toast err'; note.textContent = data.error || 'Request failed'; }
+      let data = {}; try { data = await r.json(); } catch (e) {}
+      if (r.status === 401) { note.className='toast err'; note.textContent='Not authorised (admin password required).'; }
+      else if (!r.ok || data.ok === false) { note.className='toast err'; note.textContent = data.error || 'Request failed'; }
       else { note.className='toast ok'; note.textContent = 'Done.'; }
       refreshPill();
-    } catch (e) { note.className='toast err'; note.textContent = String(e); }
+      return data;
+    } catch (e) { note.className='toast err'; note.textContent = String(e); return {}; }
   }
 
-  const startCrawl = () => post('/api/crawl/start', payload());
-  const addUrls    = () => post('/api/crawl/add', payload());
-  const stopCrawl  = () => post('/api/crawl/stop', {});
+  const startCrawl = () => postNote('/api/crawl/start', payload(), 'action-note');
+  const addUrls    = () => postNote('/api/crawl/add', payload(), 'action-note');
+  const stopCrawl  = () => postNote('/api/crawl/stop', {}, 'action-note');
+
+  async function saveSchedule() {
+    const out = await postNote('/api/schedule', {
+      enabled: chk('sched_enabled'),
+      interval_hours: num('sched_interval'),
+      older_than_days: num('sched_older'),
+      seeds: val('sched_seeds'),
+    }, 'sched-note');
+    scheduleTouched = false;
+    if (out.schedule) renderSchedule(out.schedule);
+  }
+
+  function deleteTarget() {
+    const t = val('del_target').trim();
+    if (!t) return;
+    const isUrl = /^https?:\/\//i.test(t);
+    if (!confirm('Delete ' + (isUrl ? 'this URL' : 'everything under domain "' + t + '"') + ' from the index?')) return;
+    const ep = isUrl ? '/api/index/delete-url' : '/api/index/delete-domain';
+    postNote(ep, isUrl ? {url: t} : {domain: t}, 'index-note');
+  }
+
+  function clearIndex() {
+    if (!confirm('This deletes EVERY indexed document. Crawl history is kept. Continue?')) return;
+    postNote('/api/index/clear', {}, 'index-note');
+  }
 </script>
 {% endblock %}

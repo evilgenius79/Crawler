@@ -193,31 +193,58 @@ Run the server (`python -m crawler serve`, or `windows\start-search.bat`) and
 open **http://localhost:8000** — then click **Admin** in the top bar. From there
 you can, without touching the command line:
 
-- **Start a crawl** — paste seed URLs, tweak limits (max pages/depth/workers) and
-  toggles (stay-on-domain, respect robots, render JS), and hit *Start*.
+- **Start a crawl** — paste seed URLs, tweak limits (max pages/depth/workers),
+  toggles (stay-on-domain, respect robots, render JS, skip duplicates), and
+  **exclude-URL patterns** (skip `/logout`, `?sort=`, calendars, …).
 - **Watch live status** — indexed / queued / errors / pages-per-second update
   every couple of seconds, with a progress bar and a content-type breakdown.
 - **Add URLs to a running crawl**, or **Stop** it.
 - **Review crawl history** — every run is recorded (seeds, status, pages,
   errors, duration); a crawl interrupted by a restart is flagged as such.
+- **Schedule automatic re-crawls** — enable a recurring re-crawl (every N hours,
+  refreshing pages older than M days). Settings persist across restarts.
+- **Manage the index** — delete a single URL, wipe a whole domain, or clear the
+  whole index.
 
 So you only ever need to launch **one** thing (the web server); the crawling is
 driven from the page. A live status pill in the header shows crawl activity on
 every page. Set `CRAWLER_AUTOSTART=true` (with seeds configured) to kick off a
 crawl automatically when the server starts.
 
-The same actions are available as a JSON API: `POST /api/crawl/start`,
-`/api/crawl/add`, `/api/crawl/stop`, and `GET /api/crawl/status`.
+The same actions are available as a JSON API: `POST /api/crawl/{start,add,stop}`,
+`POST /api/schedule`, `POST /api/index/{clear,delete-domain,delete-url}`, and
+`GET /api/crawl/status`.
+
+### Locking down the admin
+
+By default the admin controls are open (handy on a trusted LAN). Set
+**`CRAWLER_ADMIN_PASSWORD`** to require a password (HTTP Basic) for the admin
+page and all crawl/index/schedule actions — the search UI stays open to everyone.
+
+```bash
+CRAWLER_ADMIN_PASSWORD=your-password python -m crawler serve
+```
+
+Use an ASCII password (HTTP Basic doesn't round-trip non-ASCII reliably). The
+username is ignored — any username with the right password works.
+
+## Stats
+
+The **Stats** page (`/stats`) shows total documents, on-disk text size, your top
+domains, and a content-type breakdown.
 
 ## Search syntax
 
 Queries are tokenised and AND-ed, so `python async tutorial` finds documents
 containing all three words. Ranking is BM25 with extra weight on titles, and
-matches are highlighted in the snippet.
+matches are highlighted in the snippet. Use the **sort** dropdown to switch
+between relevance and newest, and the **cached** link under a result to read the
+stored text copy.
 
-**Filter by file type** with the chips under the search box, or inline in the
-query: `invoice type:pdf`, `cat type:image`, `resume type:doc`. Supported types
-are `web`, `pdf`, `doc`, `text`, `image`, `audio`, `video`, `archive`.
+- **By file type** — chips under the box, or inline `invoice type:pdf`
+  (`web`, `pdf`, `doc`, `text`, `image`, `audio`, `video`, `archive`).
+- **By site** — `python site:docs.python.org` limits to a domain (and its
+  subdomains).
 
 ## Security
 

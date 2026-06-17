@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -9,6 +10,8 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from .utils import domain_of
 
 _TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
 
@@ -27,6 +30,7 @@ class SearchHit:
     content_type: str
     snippet: str
     score: float
+    crawled_at: float = 0.0
 
 
 _SCHEMA = """
@@ -38,7 +42,9 @@ CREATE TABLE IF NOT EXISTS docs (
     content_type TEXT,
     crawled_at   REAL,
     depth        INTEGER,
-    size         INTEGER
+    size         INTEGER,
+    domain       TEXT,
+    content_hash TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
@@ -88,6 +94,12 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
     max_depth     INTEGER,
     detail        TEXT
 );
+
+-- Persisted key/value settings (e.g. the built-in scheduler config).
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -113,6 +125,29 @@ class Index:
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._ensure_fts5()
         self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add newer columns to a docs table created by an older version."""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(docs)")}
+        changed = False
+        if "domain" not in cols:
+            self._conn.execute("ALTER TABLE docs ADD COLUMN domain TEXT")
+            changed = True
+        if "content_hash" not in cols:
+            self._conn.execute("ALTER TABLE docs ADD COLUMN content_hash TEXT")
+            changed = True
+        if changed:
+            # Backfill from data we already have.
+            for row in self._conn.execute("SELECT id, url, content FROM docs").fetchall():
+                self._conn.execute(
+                    "UPDATE docs SET domain=?, content_hash=? WHERE id=?",
+                    (domain_of(row["url"]), _content_hash(row["content"] or ""), row["id"]),
+                )
+        # Created here (not in the schema) so they work for migrated old DBs too.
+        self._conn.execute("CREATE INDEX IF NOT EXISTS docs_domain ON docs(domain)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS docs_chash ON docs(content_hash)")
         self._conn.commit()
 
     def _ensure_fts5(self) -> None:
@@ -145,21 +180,54 @@ class Index:
         content_type: str,
         depth: int,
         size: int,
-    ) -> None:
-        self._write(
-            """
-            INSERT INTO docs (url, title, content, content_type, crawled_at, depth, size)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(url) DO UPDATE SET
-                title=excluded.title,
-                content=excluded.content,
-                content_type=excluded.content_type,
-                crawled_at=excluded.crawled_at,
-                depth=excluded.depth,
-                size=excluded.size
-            """,
-            (url, title, content, content_type, time.time(), depth, size),
-        )
+        deduplicate: bool = False,
+    ) -> bool:
+        """Insert or update a document. Returns False if skipped as a duplicate.
+
+        With ``deduplicate`` on, a page whose exact text already exists under a
+        *different* URL is skipped, so mirrors/boilerplate don't bloat the index.
+        """
+        domain = domain_of(url)
+        chash = _content_hash(content) if content else ""
+        with self._lock:
+            if deduplicate and chash:
+                dup = self._conn.execute(
+                    "SELECT 1 FROM docs WHERE content_hash=? AND url<>? LIMIT 1",
+                    (chash, url),
+                ).fetchone()
+                if dup:
+                    return False
+            self._conn.execute(
+                """
+                INSERT INTO docs
+                    (url, title, content, content_type, crawled_at, depth, size, domain, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(url) DO UPDATE SET
+                    title=excluded.title,
+                    content=excluded.content,
+                    content_type=excluded.content_type,
+                    crawled_at=excluded.crawled_at,
+                    depth=excluded.depth,
+                    size=excluded.size,
+                    domain=excluded.domain,
+                    content_hash=excluded.content_hash
+                """,
+                (url, title, content, content_type, time.time(), depth, size, domain, chash),
+            )
+            self._conn.commit()
+        return True
+
+    @staticmethod
+    def _filters(params: dict, content_type_like: str | None, domain: str | None) -> str:
+        clause = ""
+        if content_type_like:
+            clause += " AND d.content_type LIKE :ctype"
+            params["ctype"] = content_type_like
+        if domain:
+            clause += " AND (d.domain = :dom OR d.domain LIKE :domsub)"
+            params["dom"] = domain
+            params["domsub"] = "%." + domain
+        return clause
 
     def search(
         self,
@@ -167,6 +235,8 @@ class Index:
         limit: int = 20,
         offset: int = 0,
         content_type_like: str | None = None,
+        domain: str | None = None,
+        sort: str = "relevance",
     ) -> list[SearchHit]:
         match = _to_fts_query(query)
         if not match:
@@ -178,22 +248,21 @@ class Index:
             "hl_open": HL_OPEN,
             "hl_close": HL_CLOSE,
         }
-        type_clause = ""
-        if content_type_like:
-            type_clause = " AND d.content_type LIKE :ctype"
-            params["ctype"] = content_type_like
+        filters = self._filters(params, content_type_like, domain)
+        order = "d.crawled_at DESC" if sort == "date" else "score"
         rows = self._query(
             f"""
             SELECT
                 d.url AS url,
                 d.title AS title,
                 d.content_type AS content_type,
+                d.crawled_at AS crawled_at,
                 snippet(docs_fts, 1, :hl_open, :hl_close, ' … ', 16) AS snippet,
                 bm25(docs_fts, 5.0, 1.0) AS score
             FROM docs_fts
             JOIN docs d ON d.id = docs_fts.rowid
-            WHERE docs_fts MATCH :match{type_clause}
-            ORDER BY score
+            WHERE docs_fts MATCH :match{filters}
+            ORDER BY {order}
             LIMIT :limit OFFSET :offset
             """,
             params,
@@ -205,39 +274,141 @@ class Index:
                 content_type=r["content_type"] or "",
                 snippet=r["snippet"] or "",
                 score=r["score"],
+                crawled_at=r["crawled_at"] or 0.0,
             )
             for r in rows
         ]
 
-    def count_matches(self, query: str, content_type_like: str | None = None) -> int:
+    def count_matches(
+        self,
+        query: str,
+        content_type_like: str | None = None,
+        domain: str | None = None,
+    ) -> int:
         match = _to_fts_query(query)
         if not match:
             return 0
         params = {"match": match}
-        type_clause = ""
-        if content_type_like:
-            type_clause = " AND d.content_type LIKE :ctype"
-            params["ctype"] = content_type_like
+        filters = self._filters(params, content_type_like, domain)
         rows = self._query(
             f"""
             SELECT COUNT(*) AS n
             FROM docs_fts JOIN docs d ON d.id = docs_fts.rowid
-            WHERE docs_fts MATCH :match{type_clause}
+            WHERE docs_fts MATCH :match{filters}
             """,
             params,
         )
         return int(rows[0]["n"])
 
+    def list_by_domain(
+        self, domain: str, limit: int = 20, offset: int = 0, sort: str = "relevance"
+    ) -> list[SearchHit]:
+        """List a domain's pages without a text query (for browsing)."""
+        order = "crawled_at DESC" if sort == "date" else "url"
+        rows = self._query(
+            f"""SELECT url, title, content_type, crawled_at FROM docs
+                WHERE domain=? OR domain LIKE ?
+                ORDER BY {order} LIMIT ? OFFSET ?""",
+            (domain, "%." + domain, limit, offset),
+        )
+        return [
+            SearchHit(
+                url=r["url"], title=r["title"] or r["url"],
+                content_type=r["content_type"] or "", snippet="",
+                score=0.0, crawled_at=r["crawled_at"] or 0.0,
+            )
+            for r in rows
+        ]
+
+    def count_by_domain(self, domain: str) -> int:
+        rows = self._query(
+            "SELECT COUNT(*) AS n FROM docs WHERE domain=? OR domain LIKE ?",
+            (domain, "%." + domain),
+        )
+        return int(rows[0]["n"])
+
+    def get_document(self, url: str) -> dict | None:
+        rows = self._query(
+            "SELECT url, title, content, content_type, crawled_at, domain FROM docs WHERE url=?",
+            (url,),
+        )
+        return dict(rows[0]) if rows else None
+
     def stats(self) -> dict:
-        total = self._query("SELECT COUNT(*) AS n FROM docs")[0]["n"]
+        row = self._query("SELECT COUNT(*) AS n, COALESCE(SUM(size),0) AS sz FROM docs")[0]
         by_type = self._query(
             "SELECT content_type, COUNT(*) AS n FROM docs "
             "GROUP BY content_type ORDER BY n DESC"
         )
         return {
-            "total_documents": int(total),
+            "total_documents": int(row["n"]),
+            "total_bytes": int(row["sz"]),
             "by_content_type": {r["content_type"]: int(r["n"]) for r in by_type},
         }
+
+    def top_domains(self, limit: int = 20) -> list[dict]:
+        rows = self._query(
+            "SELECT domain, COUNT(*) AS n FROM docs WHERE domain IS NOT NULL AND domain<>'' "
+            "GROUP BY domain ORDER BY n DESC LIMIT ?",
+            (limit,),
+        )
+        return [{"domain": r["domain"], "count": int(r["n"])} for r in rows]
+
+    # ------------------------------------------------------------------ #
+    # Index management (admin)
+    # ------------------------------------------------------------------ #
+    def clear_index(self) -> int:
+        """Delete every document and reset the frontier. Keeps crawl history."""
+        with self._lock:
+            n = self._conn.execute("SELECT COUNT(*) AS n FROM docs").fetchone()["n"]
+            self._conn.execute("DELETE FROM docs")
+            self._conn.execute("DELETE FROM frontier")
+            self._conn.commit()
+        return int(n)
+
+    def delete_by_domain(self, domain: str) -> int:
+        domain = domain.strip().lower()
+        # Only accept real domain characters, so a stray LIKE wildcard ('%','_')
+        # can never turn a single-domain delete into a wipe of the whole index.
+        if not domain or not re.fullmatch(r"[a-z0-9.\-]+", domain):
+            return 0
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM docs WHERE domain=? OR domain LIKE ?",
+                (domain, "%." + domain),
+            )
+            self._conn.execute(
+                "DELETE FROM frontier WHERE url LIKE ? OR url LIKE ?",
+                (f"%://{domain}/%", f"%.{domain}/%"),
+            )
+            self._conn.commit()
+            return cur.rowcount
+
+    def delete_url(self, url: str) -> int:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM docs WHERE url=?", (url,))
+            self._conn.execute("DELETE FROM frontier WHERE url=?", (url,))
+            self._conn.commit()
+            return cur.rowcount
+
+    # ------------------------------------------------------------------ #
+    # Key/value settings
+    # ------------------------------------------------------------------ #
+    def get_setting(self, key: str, default=None):
+        rows = self._query("SELECT value FROM settings WHERE key=?", (key,))
+        if not rows:
+            return default
+        try:
+            return json.loads(rows[0]["value"])
+        except (TypeError, ValueError):
+            return default
+
+    def set_setting(self, key: str, value) -> None:
+        self._write(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, json.dumps(value)),
+        )
 
     # ------------------------------------------------------------------ #
     # Frontier persistence (used for resumable + scheduled crawls)
@@ -347,6 +518,11 @@ class Index:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+def _content_hash(text: str) -> str:
+    """A stable hash of page text, used for exact-duplicate detection."""
+    return hashlib.sha1(text.strip().encode("utf-8", "replace")).hexdigest()
 
 
 def _to_fts_query(raw: str) -> str:

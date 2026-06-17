@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Cached — {{ doc.title or doc.url }}{% endblock %}
+
+{% block style %}
+  .banner { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 18px; margin-bottom: 18px; font-size: 13.5px; color: var(--muted); }
+  .banner .u { color: var(--url); word-break: break-all; }
+  .banner b { color: var(--fg); }
+  .doc h1 { font-size: 24px; margin: 0 0 12px; }
+  .doc .body { white-space: pre-wrap; line-height: 1.7; color: var(--fg); font-size: 15px; }
+{% endblock %}
+
+{% block content %}
+  <div class="banner">
+    This is PersonalSearch's <b>cached text</b> of
+    <a class="u" href="{{ doc.url }}" rel="noopener noreferrer">{{ doc.url }}</a>.
+    Captured {{ doc.crawled_at | ts }} · {{ doc.content_type }} ·
+    <a href="{{ doc.url }}" rel="noopener noreferrer">visit live page →</a>
+  </div>
+  <div class="doc">
+    <h1>{{ doc.title or doc.url }}</h1>
+    <div class="body">{{ doc.content }}</div>
+  </div>
+{% endblock %}
