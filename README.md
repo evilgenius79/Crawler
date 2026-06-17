@@ -233,10 +233,15 @@ you can, without touching the command line:
   **exclude-URL patterns** (skip `/logout`, `?sort=`, calendars, …).
 - **Watch live status** — indexed / queued / errors / pages-per-second update
   every couple of seconds, with a progress bar and a content-type breakdown.
+- **Test a single URL** before a full crawl — fetches one page (nothing is
+  indexed) and reports status, type, title, and whether it hit a bot challenge.
+  Honours the real-browser / render-JS / User-Agent options.
 - **See why pages failed** — an Errors panel lists each failure with its reason
-  (e.g. `HTTP 403`, `HTTP 503`, timeouts) and URL. Errors are stored per run, so
-  clicking a row in *Recent crawls* shows that crawl's failures even after a
-  restart.
+  (e.g. `HTTP 403`, `HTTP 503`, `bot challenge page`, timeouts) and URL. Errors
+  are stored per run, so the panel shows the latest crawl's failures even after a
+  restart; click any row in *Recent crawls* to see that run's errors. Pages that
+  return a bot-challenge interstitial are recorded as errors instead of being
+  indexed as junk.
 - **Set the User-Agent** per crawl (with a one-click browser-UA preset).
 - **Add URLs to a running crawl**, or **Stop** it.
 - **Review crawl history** — every run is recorded (seeds, status, pages,

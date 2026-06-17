@@ -12,7 +12,7 @@ import logging
 import time
 
 from crawler.config import Config
-from crawler.crawler import WebCrawler
+from crawler.crawler import WebCrawler, probe_url
 from crawler.index import Index
 
 log = logging.getLogger("crawler.manager")
@@ -77,6 +77,14 @@ class CrawlManager:
         self._crawler.run_id = self._run_id
         self._task = asyncio.create_task(self._run())
         log.info("Crawl started from admin with %d seed(s)", len(seeds))
+
+    async def test_url(self, url: str, overrides: dict | None = None) -> dict:
+        """Fetch one URL (no indexing) to confirm it's reachable before a crawl."""
+        overrides = overrides or {}
+        if self.running and overrides.get("real_browser"):
+            raise RuntimeError("Stop the running crawl before testing with the real browser")
+        cfg = self._build_config([url], overrides)
+        return await probe_url(cfg, url)
 
     async def start_recrawl(self, older_than_days: float, seeds: list[str] | None = None) -> None:
         """Re-crawl documents older than N days (used by the scheduler).

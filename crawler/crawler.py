@@ -20,6 +20,76 @@ from .utils import domain_of, normalize_url, registrable_suffix_match
 
 log = logging.getLogger("crawler")
 
+# Page titles that mean "you hit a bot challenge", not real content.
+_CHALLENGE_TITLES = (
+    "just a moment",
+    "attention required! | cloudflare",
+    "checking your browser before accessing",
+    "checking if the site connection is secure",
+    "verify you are human",
+    "access denied",
+)
+
+
+def looks_like_challenge(title: str, content_type: str) -> bool:
+    if content_type and "html" not in content_type:
+        return False
+    t = (title or "").strip().lower()
+    return any(m in t for m in _CHALLENGE_TITLES)
+
+
+async def probe_url(config: Config, url: str) -> dict:
+    """Fetch a single URL (no indexing) and report what happened.
+
+    Used by the admin "Test a site" button to confirm a page is reachable —
+    including via the real browser — before committing to a full crawl.
+    """
+    norm = normalize_url(url)
+    if not norm:
+        return {"ok": False, "error": "Not a valid http(s) URL", "url": url}
+    if config.block_private_addresses and not await asyncio.to_thread(
+        security.url_is_safe, norm
+    ):
+        return {"ok": False, "error": "blocked: private/unsafe host", "url": norm}
+
+    async with AsyncExitStack() as stack:
+        fetcher = await stack.enter_async_context(Fetcher(config))
+        result = None
+        if config.real_browser:
+            browser = await stack.enter_async_context(RealBrowser(config))
+            if browser.available:
+                result = await browser.fetch(norm)
+                if result.error == "non-html":
+                    result = None
+        if result is None:
+            result = await fetcher.fetch(norm)
+            if (
+                config.render_js
+                and result.ok
+                and result.content_type in ("text/html", "application/xhtml+xml")
+            ):
+                renderer = await stack.enter_async_context(JSRenderer(config))
+                if renderer.available:
+                    rendered = await renderer.fetch(norm)
+                    if rendered.ok:
+                        result = rendered
+
+    final_url = normalize_url(result.url) or norm
+    doc = extract(final_url, result.content_type, result.body)
+    challenge = looks_like_challenge(doc.title, result.content_type)
+    return {
+        "ok": result.ok and not challenge,
+        "status": result.status,
+        "final_url": final_url,
+        "content_type": result.content_type,
+        "error": result.error,
+        "title": doc.title,
+        "text_chars": len(doc.text),
+        "links": len(doc.links),
+        "challenge": challenge,
+        "preview": doc.text[:600],
+    }
+
 
 class WebCrawler:
     def __init__(self, config: Config, index: Index | None = None) -> None:
@@ -242,6 +312,16 @@ class WebCrawler:
         # address; no second host check is needed.
         final_url = normalize_url(result.url) or url
         doc = extract(final_url, result.content_type, result.body)
+
+        # Some sites (Cloudflare et al.) answer with HTTP 200 but serve a bot
+        # challenge page. Record that as an error instead of indexing the junk.
+        if looks_like_challenge(doc.title, result.content_type):
+            log.debug("Challenge page (not indexed): %s", final_url)
+            self._errors += 1
+            await self._note_error(final_url, "blocked: bot challenge page (not indexed)")
+            await self._persist_state(url, "error")
+            return
+
         is_textual = result.content_type in self.config.textual_content_types or bool(
             doc.text
         )

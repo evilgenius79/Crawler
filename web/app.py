@@ -231,6 +231,10 @@ def api_crawl_status():
     st["stats"] = index.stats()
     st["recent"] = manager.history()
     st["schedule"] = scheduler.status()
+    # Show the latest run's *persisted* errors so the panel works live AND after
+    # a restart (the in-memory list is lost when the process restarts).
+    if st["recent"]:
+        st["recent_errors"] = index.errors_for_run(st["recent"][0]["id"], limit=30)
     return st
 
 
@@ -267,6 +271,17 @@ async def api_crawl_add(payload: dict = Body(default={})):
 @app.post("/api/crawl/stop", dependencies=[Depends(require_admin)])
 def api_crawl_stop():
     return {"ok": True, "stopping": manager.stop(), "status": manager.status()}
+
+
+@app.post("/api/crawl/test", dependencies=[Depends(require_admin)])
+async def api_crawl_test(payload: dict = Body(default={})):
+    url = str(payload.get("url", "")).strip()
+    if not url:
+        return JSONResponse({"ok": False, "error": "No URL given."}, status_code=400)
+    try:
+        return await manager.test_url(url, _overrides(payload))
+    except (RuntimeError, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
 # ----------------------------- scheduler --------------------------------- #
