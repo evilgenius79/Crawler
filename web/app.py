@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import secrets
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+log = logging.getLogger("crawler.web")
+
+
+def playwright_available() -> bool:
+    try:
+        import playwright  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def _log_environment() -> None:
+    """Print which Python this server runs on + whether Playwright is visible.
+
+    This makes the #1 real-browser gotcha obvious: Playwright installed into a
+    different Python than the one running the server.
+    """
+    log.info("Server Python: %s", sys.executable)
+    if playwright_available():
+        log.info("Playwright: available — real-browser / render-JS ready.")
+    else:
+        log.warning(
+            "Playwright: NOT installed in THIS environment, so real-browser / "
+            "render-JS will fall back to plain HTTP. Install it into the Python "
+            "above, e.g.:  \"%s\" -m pip install playwright && \"%s\" -m playwright "
+            "install chromium",
+            sys.executable, sys.executable,
+        )
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -51,6 +83,7 @@ def require_admin(credentials: HTTPBasicCredentials | None = Depends(_basic)) ->
 async def lifespan(app: FastAPI):
     # A crawl row left as 'running' means the server died mid-crawl last time.
     index.mark_running_interrupted()
+    _log_environment()
     autostart = os.environ.get("CRAWLER_AUTOSTART", "").lower() in ("1", "true", "yes")
     if autostart and config.seeds:
         try:
@@ -231,6 +264,7 @@ def api_crawl_status():
     st["stats"] = index.stats()
     st["recent"] = manager.history()
     st["schedule"] = scheduler.status()
+    st["playwright"] = playwright_available()
     # Show the latest run's *persisted* errors so the panel works live AND after
     # a restart (the in-memory list is lost when the process restarts).
     if st["recent"]:

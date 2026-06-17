@@ -80,7 +80,7 @@
       <label class="opt"><input type="checkbox" id="same_domain_only"> Stay on seed domains only</label>
       <label class="opt"><input type="checkbox" id="respect_robots"> Respect robots.txt</label>
       <label class="opt"><input type="checkbox" id="render_js"> Render JavaScript</label>
-      <label class="opt"><input type="checkbox" id="real_browser"> Real browser (solve challenges)</label>
+      <label class="opt"><input type="checkbox" id="real_browser"> Real browser (solve challenges) <span id="pw-state" class="muted"></span></label>
       <label class="opt"><input type="checkbox" id="deduplicate" checked> Skip duplicate pages</label>
     </div>
     <div class="muted" style="font-size:12px;margin-top:6px">
@@ -234,6 +234,10 @@
     // Don't clobber the panel while the user is viewing a specific past run.
     if (s.recent_errors && selectedRun === null) renderErrors(s.recent_errors);
     if (s.schedule && !scheduleTouched) renderSchedule(s.schedule);
+    const pw = document.getElementById('pw-state');
+    if ('playwright' in s) pw.innerHTML = s.playwright
+      ? '<span style="color:var(--good)">✓ installed</span>'
+      : '<span style="color:var(--bad)">✗ not installed — run install-browser.bat</span>';
     document.getElementById('btn-add').disabled = !running;
   };
 
