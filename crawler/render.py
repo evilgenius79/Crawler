@@ -213,13 +213,27 @@ class RealBrowser:
                 url, wait_until="domcontentloaded",
                 timeout=self.config.request_timeout * 1000,
             )
-            if await self._is_challenge(page, resp):
+            # Solving Turnstile triggers a redirect to the real page. Wait for
+            # the human to solve it, then RELOAD with the clearance cookie so we
+            # capture real content (not a mid-redirect/blank page). Loop a few
+            # times in case the site challenges again after the reload.
+            for _ in range(3):
+                if not await self._is_challenge(page, resp):
+                    break
                 if not await self._wait_until_cleared(page, url):
                     return FetchResult(
                         url=url, status=0, content_type="", body=b"",
                         error="bot challenge not solved in time",
                     )
-                resp = None  # page now holds the real content
+                try:
+                    await page.wait_for_timeout(1000)
+                    resp = await page.goto(
+                        url, wait_until="domcontentloaded",
+                        timeout=self.config.request_timeout * 1000,
+                    )
+                except Exception:
+                    resp = None
+                    break
 
             if resp is not None:
                 ctype = (resp.headers.get("content-type", "") or "").split(";", 1)[0].strip().lower()
