@@ -84,7 +84,10 @@
     <textarea class="field" id="exclude_patterns" style="min-height:54px" placeholder="/logout&#10;?sort=&#10;/calendar/"></textarea>
 
     <label class="lbl">User-Agent (blank = default; paste a browser UA for picky sites)</label>
-    <input class="field" id="user_agent" placeholder="{{ config.user_agent }}">
+    <div class="nums">
+      <input class="field" id="user_agent" placeholder="{{ config.user_agent }}">
+      <button class="btn" type="button" onclick="useBrowserUA()">Use browser UA</button>
+    </div>
     <div class="muted" style="font-size:12px;margin-top:5px">
       Tip: a real browser UA can get past simple bot filters, but Cloudflare's JS
       challenge needs “Render JavaScript” on — and managed challenges may still block.
@@ -109,8 +112,11 @@
     </table>
   </div>
 
-  <h2>Recent errors</h2>
+  <h2>Errors</h2>
   <div class="card">
+    <div class="muted" id="errors-title" style="margin-bottom:10px;font-size:13px">
+      Current / last crawl <span class="muted">— click a row in “Recent crawls” to see that run’s errors</span>
+    </div>
     <table class="hist">
       <thead><tr><th>When</th><th>Reason</th><th>URL</th></tr></thead>
       <tbody id="errors"><tr><td colspan="3" class="muted">No errors.</td></tr></tbody>
@@ -205,7 +211,8 @@
 
     if (s.stats && s.stats.by_content_type) renderTypes(s.stats.by_content_type);
     if (s.recent) renderHistory(s.recent);
-    if (s.recent_errors) renderErrors(s.recent_errors);
+    // Don't clobber the panel while the user is viewing a specific past run.
+    if (s.recent_errors && selectedRun === null) renderErrors(s.recent_errors);
     if (s.schedule && !scheduleTouched) renderSchedule(s.schedule);
     document.getElementById('btn-add').disabled = !running;
   };
@@ -218,6 +225,24 @@
         <td><span class="sb error">${esc(e.reason)}</span></td>
         <td class="seeds"><a href="${esc(e.url)}" rel="noopener noreferrer">${esc(e.url)}</a></td>
       </tr>`).join('');
+  }
+
+  // Viewing a specific past run's errors (null = live current/last crawl).
+  let selectedRun = null;
+  async function loadRunErrors(id) {
+    selectedRun = id;
+    document.getElementById('errors-title').innerHTML =
+      `Crawl #${id} — <a href="#" onclick="clearRun();return false;">show current crawl</a>`;
+    try {
+      const r = await fetch('/api/crawl/errors?run_id=' + id, {cache: 'no-store'});
+      renderErrors((await r.json()).errors);
+    } catch (e) { renderErrors([]); }
+    document.getElementById('errors').scrollIntoView({behavior:'smooth', block:'center'});
+  }
+  function clearRun() {
+    selectedRun = null;
+    document.getElementById('errors-title').innerHTML =
+      'Current / last crawl <span class="muted">— click a row in “Recent crawls” to see that run’s errors</span>';
   }
 
   // Don't clobber the schedule form once the user starts editing it.
@@ -255,7 +280,7 @@
       const seeds = (r.seeds || []);
       const seedTxt = seeds.length ? esc(seeds[0]) + (seeds.length > 1 ? ` +${seeds.length-1}` : '') : '—';
       const st = esc(r.status || '');
-      return `<tr>
+      return `<tr style="cursor:pointer" title="Click to view this run's errors" onclick="loadRunErrors(${r.id})">
         <td>${when(r.started_at)}</td>
         <td class="seeds" title="${esc(seeds.join(', '))}">${seedTxt}</td>
         <td><span class="sb ${st}">${st}</span></td>
@@ -305,6 +330,12 @@
       refreshPill();
       return data;
     } catch (e) { note.className='toast err'; note.textContent = String(e); return {}; }
+  }
+
+  function useBrowserUA() {
+    document.getElementById('user_agent').value =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
   }
 
   const startCrawl = () => postNote('/api/crawl/start', payload(), 'action-note');

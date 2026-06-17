@@ -206,8 +206,11 @@ you can, without touching the command line:
   **exclude-URL patterns** (skip `/logout`, `?sort=`, calendars, …).
 - **Watch live status** — indexed / queued / errors / pages-per-second update
   every couple of seconds, with a progress bar and a content-type breakdown.
-- **See why pages failed** — a Recent errors panel lists each failure with its
-  reason (e.g. `HTTP 403`, `HTTP 503`, timeouts) and URL.
+- **See why pages failed** — an Errors panel lists each failure with its reason
+  (e.g. `HTTP 403`, `HTTP 503`, timeouts) and URL. Errors are stored per run, so
+  clicking a row in *Recent crawls* shows that crawl's failures even after a
+  restart.
+- **Set the User-Agent** per crawl (with a one-click browser-UA preset).
 - **Add URLs to a running crawl**, or **Stop** it.
 - **Review crawl history** — every run is recorded (seeds, status, pages,
   errors, duration); a crawl interrupted by a restart is flagged as such.

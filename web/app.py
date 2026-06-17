@@ -239,6 +239,11 @@ def api_crawl_history(limit: int = 25):
     return {"recent": manager.history(limit)}
 
 
+@app.get("/api/crawl/errors")
+def api_crawl_errors(run_id: int):
+    return {"run_id": run_id, "errors": index.errors_for_run(run_id)}
+
+
 @app.post("/api/crawl/start", dependencies=[Depends(require_admin)])
 async def api_crawl_start(payload: dict = Body(default={})):
     seeds = _as_url_list(payload.get("seeds") or payload.get("urls"))

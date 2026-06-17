@@ -95,6 +95,16 @@ CREATE TABLE IF NOT EXISTS crawl_runs (
     detail        TEXT
 );
 
+-- Per-run fetch errors, so a past crawl's failures can be reviewed.
+CREATE TABLE IF NOT EXISTS crawl_errors (
+    id     INTEGER PRIMARY KEY,
+    run_id INTEGER,
+    url    TEXT,
+    reason TEXT,
+    ts     REAL
+);
+CREATE INDEX IF NOT EXISTS crawl_errors_run ON crawl_errors(run_id);
+
 -- Persisted key/value settings (e.g. the built-in scheduler config).
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -489,6 +499,20 @@ class Index:
             "errors=?, detail=? WHERE id=?",
             (time.time(), status, pages_indexed, errors, detail, run_id),
         )
+
+    def add_crawl_error(self, run_id: int, url: str, reason: str) -> None:
+        self._write(
+            "INSERT INTO crawl_errors (run_id, url, reason, ts) VALUES (?, ?, ?, ?)",
+            (run_id, url, reason, time.time()),
+        )
+
+    def errors_for_run(self, run_id: int, limit: int = 200) -> list[dict]:
+        rows = self._query(
+            "SELECT url, reason, ts FROM crawl_errors WHERE run_id=? "
+            "ORDER BY id DESC LIMIT ?",
+            (run_id, limit),
+        )
+        return [{"url": r["url"], "reason": r["reason"], "when": r["ts"]} for r in rows]
 
     def mark_running_interrupted(self) -> int:
         """On startup, flag any 'running' rows left over from a crash/restart."""

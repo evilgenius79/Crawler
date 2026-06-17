@@ -44,6 +44,8 @@ class WebCrawler:
         self._renderer: JSRenderer | None = None
         self._start_time: float | None = None
         self._stopped_by_user = False
+        # Set by the web manager so errors can be persisted against the run.
+        self.run_id: int | None = None
 
     # ------------------------------------------------------------------ #
     # Live control surface (used by the web admin dashboard)
@@ -75,8 +77,11 @@ class WebCrawler:
             "recent_errors": list(self._recent_errors)[-15:][::-1],
         }
 
-    def _record_error(self, url: str, reason: str) -> None:
+    async def _note_error(self, url: str, reason: str) -> None:
+        """Record a failure for the live panel and (for web crawls) persist it."""
         self._recent_errors.append({"url": url, "reason": reason, "when": time.time()})
+        if self.run_id is not None:
+            await asyncio.to_thread(self.index.add_crawl_error, self.run_id, url, reason)
 
     async def add_urls(self, urls: list[str], depth: int = 0) -> int:
         """Inject URLs into a running (or about-to-run) crawl's frontier."""
@@ -208,7 +213,7 @@ class WebCrawler:
             return
         if not await self._host_is_safe(url):
             log.debug("Blocked unsafe/private address: %s", url)
-            self._record_error(url, "blocked: unresolved or private/unsafe host")
+            await self._note_error(url, "blocked: unresolved or private/unsafe host")
             await self._persist_state(url, "error")
             return
         if self.config.respect_robots and not await self._robots.allowed(url):
@@ -222,7 +227,7 @@ class WebCrawler:
             reason = f"HTTP {result.status}" if result.status else (result.error or "fetch failed")
             log.debug("Fetch failed (%s): %s", reason, url)
             self._errors += 1
-            self._record_error(url, reason)
+            await self._note_error(url, reason)
             await self._persist_state(url, "error")
             return
 

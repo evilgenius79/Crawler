@@ -73,6 +73,7 @@ class CrawlManager:
         self._run_id = await asyncio.to_thread(
             self._index.record_crawl_start, seeds, cfg.max_pages, cfg.max_depth
         )
+        self._crawler.run_id = self._run_id
         self._task = asyncio.create_task(self._run())
         log.info("Crawl started from admin with %d seed(s)", len(seeds))
 
