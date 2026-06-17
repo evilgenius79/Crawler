@@ -55,14 +55,21 @@ async def probe_url(config: Config, url: str) -> dict:
     async with AsyncExitStack() as stack:
         fetcher = await stack.enter_async_context(Fetcher(config))
         result = None
+        engine = "http"
+        browser_requested = bool(config.real_browser)
+        browser_available = False
         if config.real_browser:
             browser = await stack.enter_async_context(RealBrowser(config))
+            browser_available = browser.available
             if browser.available:
                 result = await browser.fetch(norm)
                 if result.error == "non-html":
-                    result = None
+                    result = None  # fall back to HTTP for non-HTML
+                else:
+                    engine = "real-browser"
         if result is None:
             result = await fetcher.fetch(norm)
+            engine = "http"
             if (
                 config.render_js
                 and result.ok
@@ -73,6 +80,7 @@ async def probe_url(config: Config, url: str) -> dict:
                     rendered = await renderer.fetch(norm)
                     if rendered.ok:
                         result = rendered
+                        engine = "render-js"
 
     final_url = normalize_url(result.url) or norm
     doc = extract(final_url, result.content_type, result.body)
@@ -88,6 +96,9 @@ async def probe_url(config: Config, url: str) -> dict:
         "links": len(doc.links),
         "challenge": challenge,
         "preview": doc.text[:600],
+        "engine": engine,
+        "browser_requested": browser_requested,
+        "browser_available": browser_available,
     }
 
 

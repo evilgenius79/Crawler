@@ -386,6 +386,7 @@
     const result = badge + (d.status ? ' · HTTP ' + d.status : '') + (d.error ? ' · ' + esc(d.error) : '');
     const rows = [
       ['Result', result],
+      ['Fetched via', esc(d.engine || 'http')],
       ['Final URL', d.final_url ? `<a href="${esc(d.final_url)}" rel="noopener noreferrer">${esc(d.final_url)}</a>` : '—'],
       ['Type', esc(d.content_type || '—')],
       ['Title', esc(d.title || '—')],
@@ -393,6 +394,9 @@
     ];
     let html = '<div style="display:grid;grid-template-columns:92px 1fr;gap:6px 12px;font-size:13.5px">'
       + rows.map(([k,v]) => `<div class="muted">${k}</div><div>${v}</div>`).join('') + '</div>';
+    if (d.browser_requested && !d.browser_available)
+      html += '<div class="toast err" style="margin-top:8px">Real browser was requested but isn\'t available — used plain HTTP instead. '
+        + 'Run <b>install-browser.bat</b>, and make sure the server runs in your desktop session (not a service).</div>';
     if (d.challenge) html += '<div class="toast err" style="margin-top:8px">This page is a bot challenge — turn on “Real browser” and solve it once.</div>';
     if (d.preview) html += `<div class="muted" style="margin-top:10px;white-space:pre-wrap;max-height:160px;overflow:auto;font-size:13px;border-top:1px solid var(--border);padding-top:8px">${esc(d.preview)}</div>`;
     out.innerHTML = html;
