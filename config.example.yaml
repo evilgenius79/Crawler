@@ -52,6 +52,10 @@ resume: true
 # than this many days ago. 0 disables (use the `recrawl`/`schedule` commands).
 recrawl_after_days: 0
 
+# Seed the frontier from robots.txt + sitemap.xml for fuller coverage.
+use_sitemaps: true
+sitemap_max_urls: 5000
+
 # JavaScript rendering. Requires Playwright + browsers installed (see README).
 render_js: false
 render_wait_ms: 1500

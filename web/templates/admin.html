@@ -82,6 +82,7 @@
       <label class="opt"><input type="checkbox" id="render_js"> Render JavaScript</label>
       <label class="opt"><input type="checkbox" id="real_browser"> Real browser (solve challenges) <span id="pw-state" class="muted"></span></label>
       <label class="opt"><input type="checkbox" id="deduplicate" checked> Skip duplicate pages</label>
+      <label class="opt"><input type="checkbox" id="use_sitemaps" checked> Use sitemaps</label>
     </div>
     <div class="muted" style="font-size:12px;margin-top:6px">
       “Real browser” opens a visible Chromium so you can solve a Cloudflare-style
@@ -337,6 +338,7 @@
       render_js: chk('render_js'),
       real_browser: chk('real_browser'),
       deduplicate: chk('deduplicate'),
+      use_sitemaps: chk('use_sitemaps'),
       exclude_patterns: val('exclude_patterns'),
       user_agent: val('user_agent'),
     };

@@ -8,12 +8,16 @@ import os
 import secrets
 import sys
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from pathlib import Path
 
 log = logging.getLogger("crawler.web")
 
 
+@lru_cache(maxsize=1)
 def playwright_available() -> bool:
+    # Cached: the result can't change during the process, and this is on the
+    # status-poll hot path (every 2s per open tab).
     try:
         import playwright  # noqa: F401
 
@@ -77,6 +81,19 @@ def require_admin(credentials: HTTPBasicCredentials | None = Depends(_basic)) ->
             detail="Unauthorized",
             headers={"WWW-Authenticate": 'Basic realm="PersonalSearch admin"'},
         )
+
+
+def is_admin(credentials: HTTPBasicCredentials | None = Depends(_basic)) -> bool:
+    """True when no password is configured, or the supplied one matches.
+
+    Used to gate admin-only *detail* in otherwise-public responses without
+    forcing a 401 on the open search UI.
+    """
+    if not ADMIN_PASSWORD:
+        return True
+    return credentials is not None and secrets.compare_digest(
+        credentials.password.encode("utf-8"), ADMIN_PASSWORD.encode("utf-8")
+    )
 
 
 @asynccontextmanager
@@ -174,6 +191,7 @@ def home(
     sort: str = "relevance",
     page: int = Query(1, ge=1),
 ):
+    sort = "date" if sort == "date" else "relevance"
     clean_q, ftype, like, domain = _parse_query(q, type)
     offset = (page - 1) * PAGE_SIZE
     hits, total = [], 0
@@ -226,6 +244,7 @@ def admin(request: Request):
 # ----------------------------- JSON API ---------------------------------- #
 @app.get("/api/search")
 def api_search(q: str = "", type: str = "", sort: str = "relevance", page: int = Query(1, ge=1)):
+    sort = "date" if sort == "date" else "relevance"
     clean_q, ftype, like, domain = _parse_query(q, type)
     offset = (page - 1) * PAGE_SIZE
     if clean_q.strip():
@@ -259,25 +278,34 @@ def api_stats():
 
 
 @app.get("/api/crawl/status")
-def api_crawl_status():
-    st = manager.status()
-    st["stats"] = index.stats()
-    st["recent"] = manager.history()
-    st["schedule"] = scheduler.status()
-    st["playwright"] = playwright_available()
-    # Show the latest run's *persisted* errors so the panel works live AND after
-    # a restart (the in-memory list is lost when the process restarts).
-    if st["recent"]:
-        st["recent_errors"] = index.errors_for_run(st["recent"][0]["id"], limit=30)
-    return st
+def api_crawl_status(admin: bool = Depends(is_admin)):
+    base = manager.status()
+    stats = index.stats()
+    if not admin:
+        # Minimal, non-sensitive info for the header pill on the public search UI.
+        return {
+            "running": base.get("running", False),
+            "pages_indexed": base.get("pages_indexed", 0),
+            "queued": base.get("queued", 0),
+            "stopping": base.get("stopping", False),
+            "stats": {"total_documents": stats.get("total_documents", 0)},
+        }
+    base["stats"] = stats
+    base["recent"] = manager.history()
+    base["schedule"] = scheduler.status()
+    base["playwright"] = playwright_available()
+    # Latest run's *persisted* errors so the panel works live AND after a restart.
+    if base["recent"]:
+        base["recent_errors"] = index.errors_for_run(base["recent"][0]["id"], limit=30)
+    return base
 
 
-@app.get("/api/crawl/history")
+@app.get("/api/crawl/history", dependencies=[Depends(require_admin)])
 def api_crawl_history(limit: int = 25):
     return {"recent": manager.history(limit)}
 
 
-@app.get("/api/crawl/errors")
+@app.get("/api/crawl/errors", dependencies=[Depends(require_admin)])
 def api_crawl_errors(run_id: int):
     return {"run_id": run_id, "errors": index.errors_for_run(run_id)}
 
@@ -319,7 +347,7 @@ async def api_crawl_test(payload: dict = Body(default={})):
 
 
 # ----------------------------- scheduler --------------------------------- #
-@app.get("/api/schedule")
+@app.get("/api/schedule", dependencies=[Depends(require_admin)])
 def api_schedule_get():
     return scheduler.status()
 
@@ -379,6 +407,22 @@ def favicon():
     return Response(status_code=204)
 
 
+@app.get("/opensearch.xml", include_in_schema=False)
+def opensearch(request: Request):
+    """OpenSearch descriptor so browsers can add PersonalSearch as a search engine."""
+    base = str(request.base_url).rstrip("/")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>PersonalSearch</ShortName>
+  <Description>Search your personal web index</Description>
+  <InputEncoding>UTF-8</InputEncoding>
+  <Image width="16" height="16" type="image/x-icon">{base}/favicon.ico</Image>
+  <Url type="text/html" method="get" template="{base}/?q={{searchTerms}}"/>
+</OpenSearchDescription>
+"""
+    return Response(content=xml, media_type="application/opensearchdescription+xml")
+
+
 # ----------------------------- helpers ----------------------------------- #
 def _as_url_list(value) -> list[str]:
     if value is None:
@@ -411,7 +455,8 @@ def _overrides(payload: dict) -> dict:
                 out[key] = max(low, caster(payload[key]))
             except (TypeError, ValueError):
                 pass
-    for key in ("same_domain_only", "respect_robots", "render_js", "real_browser", "deduplicate"):
+    for key in ("same_domain_only", "respect_robots", "render_js", "real_browser",
+                "deduplicate", "use_sitemaps"):
         if key in payload and payload[key] is not None:
             out[key] = _to_bool(payload[key])
     if "exclude_patterns" in payload and payload["exclude_patterns"] is not None:

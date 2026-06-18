@@ -157,6 +157,62 @@ def test_parse_query_filetype(monkeypatch):
         assert clean4 == "docs" and domain4 == "example.com"
 
 
+def test_looks_like_challenge_thin_vs_thick():
+    from crawler.crawler import looks_like_challenge
+
+    # Thin interstitial with a challenge title -> challenge.
+    assert looks_like_challenge("Just a moment...", "text/html", "verifying")
+    # A real long article that merely mentions the phrase -> NOT a challenge.
+    long_body = "word " * 1000
+    assert not looks_like_challenge("Checking your browser before accessing", "text/html", long_body)
+    # Non-html never a challenge.
+    assert not looks_like_challenge("Just a moment", "application/pdf", "")
+    # Normal page.
+    assert not looks_like_challenge("My Blog", "text/html", "hello")
+
+
+def test_dedup_keeps_existing_url_updatable():
+    with tempfile.TemporaryDirectory() as d:
+        idx = Index(os.path.join(d, "t.db"))
+        idx.upsert("http://a/1", "A", "shared body", "text/html", 0, 1, True)
+        # New URL duplicating A is skipped.
+        assert idx.upsert("http://b/2", "B", "different", "text/html", 0, 1, True) is True
+        # b/2 re-crawled and its content now equals A's: must still UPDATE b/2.
+        assert idx.upsert("http://b/2", "B2", "shared body", "text/html", 0, 1, True) is True
+        doc = idx.get_document("http://b/2")
+        assert doc["content"] == "shared body" and doc["title"] == "B2"
+        idx.close()
+
+
+def test_sitemap_parsing():
+    import asyncio
+
+    from crawler import sitemap
+
+    class FakeResult:
+        def __init__(self, body):
+            self.ok = bool(body)
+            self.body = body or b""
+
+    pages = {
+        "https://x.com/robots.txt": b"User-agent: *\nSitemap: https://x.com/sitemap.xml\n",
+        "https://x.com/sitemap.xml": (
+            b"<sitemapindex><sitemap><loc>https://x.com/sm1.xml</loc></sitemap></sitemapindex>"
+        ),
+        "https://x.com/sm1.xml": (
+            b"<urlset><url><loc>https://x.com/a</loc></url>"
+            b"<url><loc>https://x.com/b</loc></url></urlset>"
+        ),
+    }
+
+    class FakeFetcher:
+        async def fetch(self, url):
+            return FakeResult(pages.get(url))
+
+    urls = asyncio.run(sitemap.discover(FakeFetcher(), "https://x.com/"))
+    assert "https://x.com/a" in urls and "https://x.com/b" in urls
+
+
 def test_real_browser_ua_and_profile():
     from crawler.config import Config
     from crawler.render import RealBrowser

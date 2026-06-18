@@ -90,8 +90,10 @@ class JSRenderer:
             # race inside the browser's own stack.
             if self.config.block_private_addresses:
                 await page.route("**/*", self._guard_route)
+            # "domcontentloaded" + a settle wait avoids hanging on sites that
+            # never reach network-idle (long-poll/websocket/ads).
             resp = await page.goto(
-                url, wait_until="networkidle", timeout=self.config.request_timeout * 1000
+                url, wait_until="domcontentloaded", timeout=self.config.request_timeout * 1000
             )
             if self.config.render_wait_ms:
                 await page.wait_for_timeout(self.config.render_wait_ms)
@@ -134,6 +136,8 @@ class RealBrowser:
         self.config = config
         self._pw = None
         self._context = None
+        # Optional callable -> bool; lets a Stop request interrupt a challenge wait.
+        self.stop_requested = None
 
     @property
     def available(self) -> bool:
@@ -250,7 +254,10 @@ class RealBrowser:
         except Exception as exc:
             return FetchResult(url=url, status=0, content_type="", body=b"", error=repr(exc))
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
     async def _is_challenge(self, page, resp) -> bool:
         try:
@@ -278,6 +285,9 @@ class RealBrowser:
         deadline = time.time() + timeout
         while time.time() < deadline:
             await asyncio.sleep(2)
+            if self.stop_requested and self.stop_requested():
+                log.info("Challenge wait interrupted by stop request: %s", url)
+                return False
             if not await self._is_challenge(page, None):
                 log.info("Challenge cleared for %s", url)
                 return True

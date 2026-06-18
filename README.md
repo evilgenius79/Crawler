@@ -8,7 +8,10 @@ Docker host).
 - **Polished dark web UI** with a built-in **admin dashboard** — start/stop
   crawls, add URLs, and watch live status right from the browser
 - **Async crawler** (aiohttp) — many pages in flight at once, polite per host
-- **Crawls the open web** — follows links from site to site by default
+- **Crawls the open web** — follows links from site to site by default, and
+  seeds from **robots.txt / sitemap.xml** for fuller coverage
+- **Add it to your browser** — an OpenSearch descriptor lets you search your
+  index straight from the browser's address bar
 - **Crawls everything** — HTML, PDF, DOCX and plain text get full-text indexed;
   every other file type is still indexed by URL/type/size so nothing is lost
 - **File-type search** — filter results to PDFs, docs, images, etc.
@@ -280,6 +283,14 @@ username is ignored — any username with the right password works.
 
 The **Stats** page (`/stats`) shows total documents, on-disk text size, your top
 domains, and a content-type breakdown.
+
+## Add PersonalSearch to your browser
+
+The home page advertises an OpenSearch descriptor (`/opensearch.xml`), so most
+browsers will offer to add PersonalSearch as a search engine — then you can
+search your own index right from the address bar. In Chrome/Edge it appears
+under Settings → Search engines; in Firefox, via the address-bar menu while on
+the page.
 
 ## Search syntax
 

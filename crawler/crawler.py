@@ -7,6 +7,7 @@ import logging
 import time
 from collections import deque
 from contextlib import AsyncExitStack
+from urllib.parse import urlparse
 
 from . import security
 from .config import Config
@@ -20,22 +21,30 @@ from .utils import domain_of, normalize_url, registrable_suffix_match
 
 log = logging.getLogger("crawler")
 
-# Page titles that mean "you hit a bot challenge", not real content.
+# Page titles that mean "you hit a bot challenge", not real content. Kept
+# specific to avoid matching legitimate articles that mention these phrases.
 _CHALLENGE_TITLES = (
     "just a moment",
     "attention required! | cloudflare",
     "checking your browser before accessing",
     "checking if the site connection is secure",
-    "verify you are human",
-    "access denied",
+    "please wait... | cloudflare",
 )
 
 
-def looks_like_challenge(title: str, content_type: str) -> bool:
+def looks_like_challenge(title: str, content_type: str, text: str = "") -> bool:
+    """True only for a thin page whose title matches a known challenge.
+
+    Real bot-challenge interstitials carry almost no body text, so requiring the
+    page to be tiny prevents dropping a legitimate article that merely mentions a
+    phrase like "checking your browser" in a long body.
+    """
     if content_type and "html" not in content_type:
         return False
     t = (title or "").strip().lower()
-    return any(m in t for m in _CHALLENGE_TITLES)
+    if not any(m in t for m in _CHALLENGE_TITLES):
+        return False
+    return len(text or "") < 2000
 
 
 async def probe_url(config: Config, url: str) -> dict:
@@ -84,7 +93,7 @@ async def probe_url(config: Config, url: str) -> dict:
 
     final_url = normalize_url(result.url) or norm
     doc = extract(final_url, result.content_type, result.body)
-    challenge = looks_like_challenge(doc.title, result.content_type)
+    challenge = looks_like_challenge(doc.title, result.content_type, doc.text)
     return {
         "ok": result.ok and not challenge,
         "status": result.status,
@@ -128,6 +137,8 @@ class WebCrawler:
         self._stopped_by_user = False
         # Set by the web manager so errors can be persisted against the run.
         self.run_id: int | None = None
+        # Cached once for same_domain_only scope checks.
+        self._seed_hosts = {domain_of(s) for s in config.seeds if s}
 
     # ------------------------------------------------------------------ #
     # Live control surface (used by the web admin dashboard)
@@ -176,6 +187,28 @@ class WebCrawler:
             await asyncio.to_thread(self.index.frontier_add_many, new)
         return len(new)
 
+    async def _seed_from_sitemaps(self, seeds: list[str]) -> None:
+        """Add URLs listed in each seed site's sitemap to the frontier."""
+        from .sitemap import discover
+
+        bases = {f"{urlparse(s).scheme}://{urlparse(s).netloc}" for s in seeds}
+        added = 0
+        for base in bases:
+            try:
+                urls = await discover(self._fetcher, base, self.config.sitemap_max_urls)
+            except Exception:
+                log.debug("Sitemap discovery failed for %s", base, exc_info=True)
+                continue
+            new = [
+                (u, 1) for u in urls
+                if self._in_scope(u) and self.frontier.add(u, 1)
+            ]
+            added += len(new)
+            if self.config.resume and new:
+                await asyncio.to_thread(self.index.frontier_add_many, new)
+        if added:
+            log.info("Sitemaps added %d URLs to the frontier", added)
+
     # ------------------------------------------------------------------ #
     async def run(self) -> dict:
         try:
@@ -210,8 +243,13 @@ class WebCrawler:
             self._robots = RobotsCache(fetcher, self.config.user_agent)
             if self.config.real_browser:
                 self._browser = await stack.enter_async_context(RealBrowser(self.config))
+                # Let a Stop request interrupt a long challenge wait.
+                self._browser.stop_requested = self._stop.is_set
             elif self.config.render_js:
                 self._renderer = await stack.enter_async_context(JSRenderer(self.config))
+
+            if self.config.use_sitemaps and seeds:
+                await self._seed_from_sitemaps(seeds)
 
             workers = [
                 asyncio.create_task(self._worker(i))
@@ -326,7 +364,7 @@ class WebCrawler:
 
         # Some sites (Cloudflare et al.) answer with HTTP 200 but serve a bot
         # challenge page. Record that as an error instead of indexing the junk.
-        if looks_like_challenge(doc.title, result.content_type):
+        if looks_like_challenge(doc.title, result.content_type, doc.text):
             log.debug("Challenge page (not indexed): %s", final_url)
             self._errors += 1
             await self._note_error(final_url, "blocked: bot challenge page (not indexed)")
@@ -412,8 +450,7 @@ class WebCrawler:
                 for a in self.config.allowed_domains
             )
         if self.config.same_domain_only:
-            seed_hosts = {domain_of(s) for s in self.config.seeds}
-            return any(registrable_suffix_match(host, h) for h in seed_hosts if h)
+            return any(registrable_suffix_match(host, h) for h in self._seed_hosts if h)
         return True
 
     async def _host_is_safe(self, url: str) -> bool:

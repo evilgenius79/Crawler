@@ -141,24 +141,29 @@ class Index:
     def _migrate(self) -> None:
         """Add newer columns to a docs table created by an older version."""
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(docs)")}
-        changed = False
         if "domain" not in cols:
             self._conn.execute("ALTER TABLE docs ADD COLUMN domain TEXT")
-            changed = True
         if "content_hash" not in cols:
             self._conn.execute("ALTER TABLE docs ADD COLUMN content_hash TEXT")
-            changed = True
-        if changed:
-            # Backfill from data we already have.
-            for row in self._conn.execute("SELECT id, url, content FROM docs").fetchall():
-                self._conn.execute(
-                    "UPDATE docs SET domain=?, content_hash=? WHERE id=?",
-                    (domain_of(row["url"]), _content_hash(row["content"] or ""), row["id"]),
-                )
         # Created here (not in the schema) so they work for migrated old DBs too.
         self._conn.execute("CREATE INDEX IF NOT EXISTS docs_domain ON docs(domain)")
         self._conn.execute("CREATE INDEX IF NOT EXISTS docs_chash ON docs(content_hash)")
         self._conn.commit()
+        # Idempotent backfill: fill any rows still missing the new columns. This
+        # also completes a migration that was interrupted partway through.
+        while True:
+            rows = self._conn.execute(
+                "SELECT id, url, content FROM docs "
+                "WHERE domain IS NULL OR content_hash IS NULL LIMIT 1000"
+            ).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                self._conn.execute(
+                    "UPDATE docs SET domain=?, content_hash=? WHERE id=?",
+                    (domain_of(row["url"]), _content_hash(row["content"] or ""), row["id"]),
+                )
+            self._conn.commit()
 
     def _ensure_fts5(self) -> None:
         try:
@@ -201,12 +206,19 @@ class Index:
         chash = _content_hash(content) if content else ""
         with self._lock:
             if deduplicate and chash:
-                dup = self._conn.execute(
-                    "SELECT 1 FROM docs WHERE content_hash=? AND url<>? LIMIT 1",
-                    (chash, url),
+                # Only drop a *new* URL that duplicates an existing one. A URL
+                # already in the index must always update, even if its new
+                # content now matches another page (otherwise it keeps stale text).
+                known = self._conn.execute(
+                    "SELECT 1 FROM docs WHERE url=? LIMIT 1", (url,)
                 ).fetchone()
-                if dup:
-                    return False
+                if not known:
+                    dup = self._conn.execute(
+                        "SELECT 1 FROM docs WHERE content_hash=? AND url<>? LIMIT 1",
+                        (chash, url),
+                    ).fetchone()
+                    if dup:
+                        return False
             self._conn.execute(
                 """
                 INSERT INTO docs

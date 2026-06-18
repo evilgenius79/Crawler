@@ -63,6 +63,10 @@ class Config:
     resume: bool = True  # persist the frontier and resume pending URLs
     recrawl_after_days: float = 0.0  # >0 re-queues docs older than this on crawl
 
+    # Seed the frontier from robots.txt / sitemap.xml for fuller coverage.
+    use_sitemaps: bool = True
+    sitemap_max_urls: int = 5000
+
     # Concurrency / limits.
     concurrency: int = 10
     max_pages: int = 10_000

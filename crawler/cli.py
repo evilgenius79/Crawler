@@ -36,6 +36,11 @@ def _build_parser() -> argparse.ArgumentParser:
             help="Only follow links within the seed domains",
         )
         sp.add_argument(
+            "--no-sitemaps",
+            action="store_true",
+            help="Don't seed the frontier from robots.txt / sitemap.xml",
+        )
+        sp.add_argument(
             "--ignore-robots",
             action="store_true",
             help="Do not fetch or obey robots.txt (this is the default)",
@@ -138,6 +143,8 @@ def _load_config(args) -> Config:
         cfg.recrawl_after_days = args.older_than_days
     if getattr(args, "user_agent", None):
         cfg.user_agent = args.user_agent
+    if getattr(args, "no_sitemaps", False):
+        cfg.use_sitemaps = False
     if getattr(args, "seeds", None):
         cfg.seeds = args.seeds
     return cfg

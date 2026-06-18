@@ -51,6 +51,7 @@ class CrawlManager:
             "recrawl_after_days",
             "deduplicate",
             "exclude_patterns",
+            "use_sitemaps",
             "user_agent",
         ):
             if overrides.get(key) is not None:
